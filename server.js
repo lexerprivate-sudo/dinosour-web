@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { randomBytes } from 'node:crypto';
 import { search, shortsFeed, shortsPool } from './youtube-search.js';
+import { selectAudioFormats } from './audio-formats.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const host = process.env.HOST || '127.0.0.1';
@@ -139,7 +140,7 @@ async function getVideo(id) {
     // Keep alternative AAC tracks as fallbacks. A single signed media URL can
     // occasionally be refused by YouTube mid-play; the browser can switch to a
     // different track without asking the user to reopen the whole video.
-    const audioFormats = formats.filter(f => f.vcodec === 'none' && f.ext === 'm4a').sort((a, b) => (b.abr || 0) - (a.abr || 0));
+    const audioFormats = selectAudioFormats(formats);
     const audio = audioFormats[0];
     const heights = new Set();
     const qualities = video.filter(f => !heights.has(qualityOf(f)) && heights.add(qualityOf(f))).map(f => ({

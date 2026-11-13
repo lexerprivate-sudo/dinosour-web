@@ -53,6 +53,8 @@ try {
     if (request.url().includes(`/api/video?id=${item.id}`)) metadataRequests++;
   });
   const link = page.locator('.card .thumb a').first();
+  await page.waitForResponse(response => response.url().includes(`/api/video?id=${item.id}`) && response.ok());
+  assert.equal(metadataRequests, 1, 'visible cards should prepare metadata before hover or click');
   await link.hover();
   await page.waitForFunction(() => window.testMedia.filter(m => m.readyState >= 3 && m.buffered.length).length >= 2);
   const warm = await page.evaluate(() => {

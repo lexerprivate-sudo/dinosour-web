@@ -8,6 +8,8 @@ try { library = JSON.parse(localStorage.getItem(key)) || {}; } catch { library =
 for (const field of ['saved', 'history', 'liked']) if (!Array.isArray(library[field])) library[field] = [];
 const videos = new Map();
 const infoCache = new Map();
+const infoCacheTimes = new Map();
+let browsePrepareTimer, browsePreparing = false;
 const autoRetryCount = new Map();
 let generation = 0, cleanup = () => {}, toastTimer, lastShortsQuery = '';
 let shortsFeed = [], shortsFeedCursor = '';
@@ -185,6 +187,7 @@ async function feed(query, current, controller, mode = 'video') {
       }
       const fresh = data.videos.filter(v => { if (seen.has(v.id)) return false; seen.add(v.id); return true; });
       $('#results').insertAdjacentHTML('beforeend', fresh.map(shorts ? shortCard : card).join(''));
+      if (!shorts) prepareVisibleMetadata();
       if (shorts) {
         for (const v of data.videos) if (!shortsFeed.some(item => item.id === v.id)) shortsFeed.push(v);
         shortsFeedCursor = data.continuation || shortsFeedCursor;
@@ -223,6 +226,28 @@ function collection(field) {
   main.className = 'collection-page';
   main.innerHTML = `<div class="collection-heading"><div><h1>${titles[field]}</h1><p>${count} ${count === 1 ? 'video' : 'videos'} · Saved on this device</p></div>${count ? `<button class="clear" id="clear-library">${icon('trash')}Clear ${field === 'history' ? 'history' : 'list'}</button>` : ''}</div>${count ? `<div class="grid">${library[field].map(card).join('')}</div>` : empty(field === 'history' ? 'Keep track of what you watch' : 'Your collection starts here', field === 'history' ? 'Videos you play will appear here, ready to pick up where you left off.' : 'Save or like a video to find it here later.')}`;
   if ($('#clear-library')) $('#clear-library').onclick = () => { library[field] = []; persist(); collection(field); };
+  prepareVisibleMetadata();
+}
+
+// Resolve the slow stream-details step while the viewer is browsing, rather
+// than waiting until touch-down. Only three visible cards, one request at a time.
+function prepareVisibleMetadata() {
+  clearTimeout(browsePrepareTimer);
+  const current = generation;
+  browsePrepareTimer = setTimeout(async () => {
+    if (browsePreparing || document.hidden || navigator.connection?.saveData ||
+        /(^|-)2g$/.test(navigator.connection?.effectiveType || '')) return;
+    const ids = [...new Set([...main.querySelectorAll('.card .thumb a[href^="#watch="]')]
+      .filter(link => { const r = link.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })
+      .map(link => link.getAttribute('href').slice(7)))].slice(0, 3);
+    browsePreparing = true;
+    try {
+      for (const id of ids) {
+        if (current !== generation || document.hidden) break;
+        try { await shortInfo(id); } catch { /* Clicking still allows a fresh retry. */ }
+      }
+    } finally { browsePreparing = false; }
+  }, 350);
 }
 
 function qualityOptions(info) {
@@ -257,7 +282,7 @@ function prepareWatch(id) {
   warmWatch = entry;
   entry.video.preload = entry.audio.preload = 'auto';
   entry.video.playsInline = true;
-  entry.promise = api(`/api/video?id=${id}`, entry.controller.signal).then(info => {
+  entry.promise = shortInfo(id).then(info => {
     if (entry.controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
     const quality = info.qualities.find(q => q.height === 720) || info.qualities[0];
     entry.video.src = quality.src;
@@ -360,7 +385,7 @@ async function watch(id, current, controller, refresh) {
   try {
     info = warmed
       ? await warmed.promise.catch(() => api(`/api/video?id=${id}`, controller.signal))
-      : await api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, controller.signal);
+      : await shortInfo(id, controller.signal, refresh);
     if (current !== generation) return;
     remember(info);
     video.poster = info.thumb || video.poster;
@@ -499,13 +524,19 @@ async function watch(id, current, controller, refresh) {
 }
 
 const shortInfo = (id, signal, refresh) => {
-  if (!refresh && infoCache.has(id)) return Promise.resolve(infoCache.get(id));
+  if (!refresh && infoCache.has(id) && Date.now() - infoCacheTimes.get(id) < 120000) return Promise.resolve(infoCache.get(id));
   const request = api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, signal).then(info => {
     infoCache.set(id, info);
+    infoCacheTimes.set(id, Date.now());
     return info;
   });
   if (!refresh) {
     infoCache.set(id, request);
+    infoCacheTimes.set(id, Date.now());
+    if (infoCache.size > 20) {
+      const oldest = infoCache.keys().next().value;
+      infoCache.delete(oldest); infoCacheTimes.delete(oldest);
+    }
     request.catch(() => { if (infoCache.get(id) === request) infoCache.delete(id); });
   }
   return request;
@@ -960,6 +991,7 @@ async function route(refresh = false) {
   const hash = location.hash.slice(1) || 'home';
   const value = decodeValue(hash);
   clearTimeout(warmIntentTimer);
+  clearTimeout(browsePrepareTimer);
   if (!hash.startsWith('watch=')) discardWarmWatch();
   document.querySelectorAll('[data-nav]').forEach(a => {
     let active = a.dataset.nav === hash || a.dataset.nav === value;

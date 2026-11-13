@@ -23,6 +23,9 @@ winget install OpenJS.NodeJS.LTS
 winget install yt-dlp.yt-dlp
 ```
 
+Audio selection prefers English when available, otherwise the original track.
+Recovery tracks stay in the selected language.
+
 Restart the terminal after installing prerequisites. `YTDLP_PATH` can point to a
 specific executable. `PORT` overrides 3210 and `MEDIA_PORT` overrides the media
 port (3211).
@@ -157,6 +160,9 @@ physical Android device.
 
 - Hover, keyboard focus, or touch-down on a video prepares one upcoming video
   and its audio. Opening it reuses the buffered media elements.
+- While browsing, stream details for up to three visible cards are prepared
+  sequentially before a click. Shared requests avoid repeating extraction.
+  Client metadata expires after two minutes and is limited to 20 entries.
 - Speculative loading is skipped on Data Saver/2G connections, cancelled when
   leaving the page, and expires after 45 seconds.
 - While playback starts, the thumbnail and a loading message replace the blank
