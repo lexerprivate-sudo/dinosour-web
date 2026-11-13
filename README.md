@@ -158,6 +158,25 @@ physical Android device.
 
 ### Playback improvements
 
+- **Auto quality:** starts around 480p (360p with Data Saver), steps up after
+  sustained healthy buffering, and steps down during a prolonged stall. Manual
+  quality selection is remembered. Quality switches preserve position.
+- **Audio language:** choose English (preferred), Original, or an available
+  language track. The preference is remembered and applies to Shorts too.
+  Recovery uses alternatives in the same selected language.
+- **Captions:** select available creator or automatic subtitles in the Captions
+  menu. Off/language preference is remembered; unavailable tracks are disabled.
+- **Picture-in-picture / Mini-player:** native PiP on supported browsers, with
+  an in-app floating player for WebViews. Browse Home/Search/Library without
+  restarting the video. Use “Return to video” or × to restore/close it.
+- **Queue:** “Play next” and “+ Queue” add videos to a persisted queue. Move items
+  up, remove them, or clear the list. Autoplay is opt-in and follows the queue,
+  then related videos when the queue is empty.
+- **Recovery:** refreshes expired streams in the same player, retaining the
+  position, speed, volume, language, and captions rather than rebuilding the page.
+- **Buffer priority:** speculative prefetch pauses when the active video has
+  little buffered data or stalls; audio buffering can hold the video in sync.
+
 - Hover, keyboard focus, or touch-down on a video prepares one upcoming video
   and its audio. Opening it reuses the buffered media elements.
 - While browsing, stream details for up to three visible cards are prepared
@@ -172,6 +191,8 @@ physical Android device.
 
 Run `npm run test:watch-prefetch` for the deterministic buffering/resume test.
 It requires FFmpeg on PATH to generate small local media fixtures.
+`npm run test:playback-features` covers auto quality, language/caption controls,
+recovery, mini-player continuity, queue ordering/autoplay, and mobile layout.
 These are web-side changes: reopen the Android app to load them; no new APK is
 required.
 

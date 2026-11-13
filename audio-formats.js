@@ -12,3 +12,21 @@ export function selectAudioFormats(formats) {
   const selectedLanguage = language(tracks[0]);
   return tracks.filter(track => language(track) === selectedLanguage);
 }
+
+export function audioTrackGroups(formats) {
+  const groups = new Map();
+  for (const format of formats.filter(f => f.vcodec === 'none' && f.ext === 'm4a')) {
+    const language = format.language || 'und';
+    const original = /\boriginal\b/i.test(format.format_note || '') || Number(format.language_preference) > 0;
+    const id = `${language}${original ? '-original' : ''}`;
+    if (!groups.has(id)) {
+      let label = language;
+      try { label = new Intl.DisplayNames(['en'], { type: 'language' }).of(language) || language; } catch {}
+      groups.set(id, { id, language, original, label: `${label}${original ? ' (Original)' : ''}`, formats: [] });
+    }
+    groups.get(id).formats.push(format);
+  }
+  return [...groups.values()].map(group => ({
+    ...group, formats: group.formats.sort((a, b) => (b.abr || 0) - (a.abr || 0)).slice(0, 3),
+  }));
+}

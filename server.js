@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { randomBytes } from 'node:crypto';
 import { search, shortsFeed, shortsPool } from './youtube-search.js';
-import { selectAudioFormats } from './audio-formats.js';
+import { selectAudioFormats, audioTrackGroups } from './audio-formats.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const host = process.env.HOST || '127.0.0.1';
@@ -23,6 +23,7 @@ const mediaPort = Number(process.env.MEDIA_PORT || port + 1);
 let mediaBase = '';
 const cache = new Map();
 const tickets = new Map();
+const captionTickets = new Map();
 let active = 0;
 const validId = (id) => /^[A-Za-z0-9_-]{11}$/.test(id || '');
 
@@ -125,6 +126,9 @@ function withStreamUrls(video, base) {
     qualities: video.qualities.map(({ ticket, ...quality }) => ({ ...quality, src: src(ticket) })),
     audio: video.audio ? src(video.audio) : null,
     audioFallbacks: video.audioFallbacks.map(src),
+    audioTracks: (video.audioTracks || []).map(({ tickets, ...track }) => ({
+      ...track, src: src(tickets[0]), fallbacks: tickets.slice(1).map(src),
+    })),
   };
 }
 
@@ -142,6 +146,23 @@ async function getVideo(id) {
     // different track without asking the user to reopen the whole video.
     const audioFormats = selectAudioFormats(formats);
     const audio = audioFormats[0];
+    const audioTracks = audioTrackGroups(formats).map(({ formats: tracks, ...group }) => ({
+      ...group, tickets: tracks.map(f => ticket(f, f.http_headers || info.http_headers)),
+    }));
+    const captions = [];
+    for (const [automatic, tracks] of [[false, info.subtitles || {}], [true, info.automatic_captions || {}]]) {
+      for (const [language, formats] of Object.entries(tracks)) {
+        if (captions.some(c => c.language === language)) continue;
+        const format = formats.find(f => f.ext === 'vtt' && f.url);
+        if (!format) continue;
+        const url = new URL(format.url);
+        if (url.protocol !== 'https:' || !['www.youtube.com', 'youtube.com'].includes(url.hostname)) continue;
+        const token = randomBytes(24).toString('hex');
+        captionTickets.set(token, { url: url.href, expires: Date.now() + 60 * 60 * 1000 });
+        captions.push({ language, label: `${formats[0]?.name || language}${automatic ? ' (Auto)' : ''}`, src: `/api/captions/${token}` });
+        if (captionTickets.size > 3000) captionTickets.delete(captionTickets.keys().next().value);
+      }
+    }
     const heights = new Set();
     const qualities = video.filter(f => !heights.has(qualityOf(f)) && heights.add(qualityOf(f))).map(f => ({
       label: `${qualityOf(f)}p`, height: qualityOf(f), ticket: ticket(f, f.http_headers || info.http_headers),
@@ -152,6 +173,7 @@ async function getVideo(id) {
       ...normalize(info), qualities,
       audio: audio ? ticket(audio, audio.http_headers || info.http_headers) : null,
       audioFallbacks: audioFormats.slice(1, 3).map(f => ticket(f, f.http_headers || info.http_headers)),
+      audioTracks, captions,
     };
   });
 }
@@ -236,6 +258,27 @@ const server = http.createServer(async (req, res) => {
   if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { error: 'Method not allowed.' });
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
   try {
+    if (url.pathname.startsWith('/api/captions/')) {
+      const token = url.pathname.slice('/api/captions/'.length);
+      const item = captionTickets.get(token);
+      if (!item || item.expires < Date.now()) return json(res, 410, { error: 'Captions expired. Reopen the video.' });
+      const text = await cached(`captions:${token}`, 5 * 60 * 1000, async () => {
+        const upstream = await fetch(item.url, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+        if (!upstream.ok) throw new Error('Captions are unavailable right now.');
+        let bytes = 0;
+        const chunks = [];
+        for await (const chunk of upstream.body) {
+          bytes += chunk.length;
+          if (bytes > 2 * 1024 * 1024) throw new Error('Caption file is too large.');
+          chunks.push(Buffer.from(chunk));
+        }
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (!body.trimStart().startsWith('WEBVTT')) throw new Error('Unsupported caption format.');
+        return body;
+      });
+      res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8', 'cache-control': 'private, max-age=300' });
+      return res.end(req.method === 'HEAD' ? undefined : text);
+    }
     if (url.pathname.startsWith('/api/thumb/')) {
       const id = url.pathname.slice('/api/thumb/'.length);
       if (!validId(id)) return json(res, 400, { error: 'Invalid thumbnail ID.' });

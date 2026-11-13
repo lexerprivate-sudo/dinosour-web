@@ -187,6 +187,31 @@ main:focus { outline: 0; }
 .watch-buffer-hint { position: absolute; top: 16px; left: 16px; padding: 8px 14px; border-radius: 20px; background: #000b; font-size: 13px; pointer-events: none; }
 .watch-loading[hidden], .watch-buffer-hint[hidden] { display: none; }
 .watch-page .player-status { z-index: 2; }
+.quality-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; pointer-events: none; }
+.quality-frame[hidden] { display: none; }
+.watch-buffer-hint { z-index: 1; }
+.player-tools { flex-wrap: wrap; }
+.player-tools select { max-width: 180px; }
+.queue-card-tools { display: flex; gap: 6px; margin-top: 6px; }
+.queue-card-tools button { padding: 4px 8px; font-size: 11px; border-radius: 12px; color: var(--muted); background: var(--hover); }
+#watch-queue { padding: 14px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; }
+.queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.queue-heading h2 { margin: 0; font-size: 16px; }
+.autoplay-label { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; }
+#watch-queue ol { padding: 0; list-style: none; max-height: 300px; overflow-y: auto; }
+#watch-queue li { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+#watch-queue li a { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+#watch-queue button { padding: 6px 10px; }
+#mini-player { position: fixed; width: min(420px, calc(100vw - 24px)); right: 12px; bottom: calc(20px + var(--safe-bottom, 0px)); z-index: 90; background: var(--bg); box-shadow: 0 8px 40px #0009; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; padding: 0; }
+#mini-player[hidden] { display: none; }
+#mini-player .watch-layout { display: block; }
+#mini-player #watch-info, #mini-player .watch-related { display: none; }
+#mini-player .player-shell { border-radius: 0; }
+.mini-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 13px; }
+.mini-toolbar button { padding: 3px 12px; font-size: 20px; }
+@media (max-width: 700px) {
+  #mini-player { bottom: calc(var(--bottom-nav-height) + 12px + var(--safe-bottom, 0px)); }
+}
 .player-status { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; background: #0a0a0ae8; }
 .player-status:empty { display: none; }
 .player-status h2 { margin: 18px 0 8px; font-size: 18px; font-weight: 500; }

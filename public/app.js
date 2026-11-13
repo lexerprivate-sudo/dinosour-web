@@ -5,7 +5,8 @@ const escape = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '
 const key = 'dinosour.library.v1';
 let library;
 try { library = JSON.parse(localStorage.getItem(key)) || {}; } catch { library = {}; }
-for (const field of ['saved', 'history', 'liked']) if (!Array.isArray(library[field])) library[field] = [];
+for (const field of ['saved', 'history', 'liked', 'queue']) if (!Array.isArray(library[field])) library[field] = [];
+library.queue = library.queue.filter(v => v && /^[\w-]{11}$/.test(v.id)).slice(0, 100);
 const videos = new Map();
 const infoCache = new Map();
 const infoCacheTimes = new Map();
@@ -14,6 +15,11 @@ const autoRetryCount = new Map();
 let generation = 0, cleanup = () => {}, toastTimer, lastShortsQuery = '';
 let shortsFeed = [], shortsFeedCursor = '';
 let preferences = {};
+let playbackBusy = false, playbackBufferAhead = Infinity, miniSession = null;
+function allowPrefetch() {
+  return !playbackBusy && playbackBufferAhead >= 8 && !navigator.connection?.saveData &&
+    !/(^|-)2g$/.test(navigator.connection?.effectiveType || '');
+}
 try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')) || {}; } catch {}
 preferences.topics = Array.isArray(preferences.topics) ? [...new Set(preferences.topics.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 80)).filter(Boolean))] : [];
 function savePreferences() {
@@ -90,7 +96,7 @@ function card(v) {
   const saved = library.saved.some(item => item.id === v.id);
   const hue = [...(v.channel || '')].reduce((n, char) => n + char.charCodeAt(0), 0) % 360;
   const href = v.type === 'short' ? `#short=${v.id}` : `#watch=${v.id}`;
-  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p></div></div></article>`;
+  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play ${escape(v.title)} next">Play next</button><button data-queue-add="${v.id}" aria-label="Add ${escape(v.title)} to queue">+ Queue</button></div></div></div></article>`;
 }
 function shortCard(v) {
   remember(v);
@@ -235,15 +241,14 @@ function prepareVisibleMetadata() {
   clearTimeout(browsePrepareTimer);
   const current = generation;
   browsePrepareTimer = setTimeout(async () => {
-    if (browsePreparing || document.hidden || navigator.connection?.saveData ||
-        /(^|-)2g$/.test(navigator.connection?.effectiveType || '')) return;
+    if (browsePreparing || document.hidden || !allowPrefetch()) return;
     const ids = [...new Set([...main.querySelectorAll('.card .thumb a[href^="#watch="]')]
       .filter(link => { const r = link.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })
       .map(link => link.getAttribute('href').slice(7)))].slice(0, 3);
     browsePreparing = true;
     try {
       for (const id of ids) {
-        if (current !== generation || document.hidden) break;
+        if (current !== generation || document.hidden || !allowPrefetch()) break;
         try { await shortInfo(id); } catch { /* Clicking still allows a fresh retry. */ }
       }
     } finally { browsePreparing = false; }
@@ -275,7 +280,7 @@ function discardWarmWatch() {
   warmWatch = null;
 }
 function prepareWatch(id) {
-  if (navigator.connection?.saveData || /(^|-)2g$/.test(navigator.connection?.effectiveType || '')) return;
+  if (!allowPrefetch()) return;
   if (warmWatch?.id === id || location.hash === `#watch=${id}`) return;
   discardWarmWatch();
   const entry = { id, controller: new AbortController(), video: document.createElement('video'), audio: document.createElement('audio') };
@@ -284,9 +289,10 @@ function prepareWatch(id) {
   entry.video.playsInline = true;
   entry.promise = shortInfo(id).then(info => {
     if (entry.controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-    const quality = info.qualities.find(q => q.height === 720) || info.qualities[0];
+    const quality = info.qualities[startQuality(info)];
     entry.video.src = quality.src;
-    if (quality.separateAudio && info.audio) entry.audio.src = info.audio;
+    const track = preferredAudio(info);
+    if (quality.separateAudio && (track?.src || info.audio)) entry.audio.src = track?.src || info.audio;
     return info;
   });
   entry.promise.catch(() => { if (warmWatch === entry) discardWarmWatch(); });
@@ -311,7 +317,83 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { clearTimeout(warmIntentTimer); discardWarmWatch(); }
 });
 
+function startQuality(info) {
+  const target = Number(preferences.qualityHeight) || (navigator.connection?.saveData ? 360 : 480);
+  const candidates = info.qualities.map((q, i) => ({ ...q, i })).sort((a, b) => b.height - a.height);
+  return (candidates.find(q => q.height <= target) || candidates.at(-1)).i;
+}
+function preferredAudio(info) {
+  const tracks = info.audioTracks || [];
+  if (!preferences.audioLanguage || ['en', 'preferred-en'].includes(preferences.audioLanguage)) {
+    const english = tracks.filter(t => t.language.split('-')[0] === 'en');
+    return english.find(t => t.original) || english[0] || tracks.find(t => t.original) || tracks[0];
+  }
+  const exact = tracks.find(t => t.id === preferences.audioLanguage);
+  if (exact) return exact;
+  if (preferences.audioLanguage === 'original') return tracks.find(t => t.original) || tracks[0];
+  const language = preferences.audioLanguage || 'en';
+  return tracks.find(t => t.language === language) ||
+    tracks.find(t => t.language.split('-')[0] === language.split('-')[0]) ||
+    tracks.find(t => t.original) || tracks[0];
+}
+function renderQueue() {
+  const panel = $('#watch-queue');
+  if (!panel) return;
+  panel.innerHTML = `<div class="queue-heading"><h2>Up next (${library.queue.length})</h2><button data-queue-clear ${library.queue.length ? '' : 'disabled'}>Clear</button></div><label class="autoplay-label"><input id="queue-autoplay" type="checkbox" ${preferences.autoplay ? 'checked' : ''}> Autoplay queue / related video</label><ol>${library.queue.map((v, i) => `<li><a href="#watch=${v.id}">${escape(v.title)}</a><button data-queue-up="${i}" aria-label="Move ${escape(v.title)} up" ${i ? '' : 'disabled'}>↑</button><button data-queue-remove="${i}" aria-label="Remove ${escape(v.title)}">×</button></li>`).join('')}</ol>${library.queue.length ? '' : '<p class="muted">Use “Play next” or “+ Queue” on a video.</p>'}`;
+  $('#queue-autoplay').onchange = e => { preferences.autoplay = e.target.checked; savePreferences(); };
+}
+document.addEventListener('click', event => {
+  const next = event.target.closest('[data-queue-next]'), add = event.target.closest('[data-queue-add]');
+  if (next || add) {
+    const id = next?.dataset.queueNext || add.dataset.queueAdd, item = videos.get(id);
+    if (item) {
+      library.queue = library.queue.filter(v => v.id !== id);
+      if (next) library.queue.unshift(compact(item)); else library.queue.push(compact(item));
+      library.queue = library.queue.slice(0, 100);
+      toast(next ? 'Added to play next' : 'Added to queue');
+    }
+  } else if (event.target.closest('[data-queue-clear]')) library.queue = [];
+  else if (event.target.closest('[data-queue-remove]')) library.queue.splice(Number(event.target.closest('[data-queue-remove]').dataset.queueRemove), 1);
+  else if (event.target.closest('[data-queue-up]')) {
+    const i = Number(event.target.closest('[data-queue-up]').dataset.queueUp);
+    if (i > 0 && i < library.queue.length) [library.queue[i - 1], library.queue[i]] = [library.queue[i], library.queue[i - 1]];
+  } else return;
+  persist(); renderQueue();
+});
+
+// Keep the actual player mounted while browsing, so both its buffer and audio
+// survive navigation. Native PiP is optional; the in-app mini-player works in WebView.
+function enableMiniPlayer(id) {
+  if (miniSession) return;
+  const layout = $('.watch-layout');
+  if (!layout) return;
+  const host = document.createElement('section');
+  host.id = 'mini-player'; host.className = 'watch-page'; host.hidden = true;
+  const bar = document.createElement('div');
+  bar.className = 'mini-toolbar';
+  bar.innerHTML = `<a href="#watch=${id}">Return to video</a><button aria-label="Close mini-player">×</button>`;
+  host.append(bar); document.body.append(host);
+  miniSession = { id, host, layout, cleanup, controller: routeController, detached: false };
+  bar.querySelector('button').onclick = () => {
+    if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    if (miniSession?.detached) miniSession.cleanup();
+    host.remove(); miniSession = null;
+  };
+}
+function movePlayer(layout, target) {
+  const video = layout.querySelector('video'), resume = video && !video.paused;
+  if (target.moveBefore) target.moveBefore(layout, null);
+  else {
+    target.append(layout);
+    // Older WebViews pause media when reparenting it. Resume after that task.
+    if (resume) setTimeout(() => {
+      if (video.isConnected) video.play().catch(() => {});
+    }, 0);
+  }
+}
+
 async function watch(id, current, controller, refresh) {
+  playbackBusy = true; playbackBufferAhead = 0;
   clearTimeout(warmIntentTimer);
   const warmed = !refresh && warmWatch?.id === id ? warmWatch : null;
   if (warmed) { clearTimeout(warmed.expiry); warmWatch = null; }
@@ -335,9 +417,19 @@ async function watch(id, current, controller, refresh) {
   bufferHint.className = 'watch-buffer-hint'; bufferHint.hidden = true;
   bufferHint.setAttribute('role', 'status'); bufferHint.textContent = 'Buffering…';
   video.parentElement.append(bufferHint);
-  let waitingTimer, hasFrame = false;
+  let waitingTimer, stallTimer, hasFrame = false, switching = false, playingIntent = true, audioBuffering = false, ignorePause = false;
+  let reloadStreams, captionRequest = 0, captionBlob = null;
+  const frozenFrame = document.createElement('canvas');
+  frozenFrame.className = 'quality-frame'; frozenFrame.hidden = true;
+  video.parentElement.append(frozenFrame);
+  const freezeFrame = () => {
+    if (video.readyState < 2 || !video.videoWidth) return;
+    frozenFrame.width = video.videoWidth; frozenFrame.height = video.videoHeight;
+    try { frozenFrame.getContext('2d').drawImage(video, 0, 0); frozenFrame.hidden = false; } catch {}
+  };
   const hideLoading = () => {
     hasFrame = true; loading.hidden = true; video.controls = true;
+    frozenFrame.hidden = true;
     clearTimeout(waitingTimer); bufferHint.hidden = true;
   };
   const showBuffering = () => {
@@ -355,7 +447,9 @@ async function watch(id, current, controller, refresh) {
     persist();
   };
   cleanup = () => {
-    saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer);
+    saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer); clearTimeout(stallTimer);
+    playbackBusy = false; playbackBufferAhead = Infinity;
+    captionRequest++; if (captionBlob) URL.revokeObjectURL(captionBlob);
     warmed?.controller.abort();
     video.pause(); audio.pause();
     video.removeAttribute('src'); audio.removeAttribute('src'); video.load(); audio.load();
@@ -363,11 +457,12 @@ async function watch(id, current, controller, refresh) {
   const showError = message => {
     if (disposed) return;
     loading.hidden = true; bufferHint.hidden = true; clearTimeout(waitingTimer);
+    clearTimeout(stallTimer); playbackBusy = false;
     video.pause(); audio.pause();
     $('#unmute')?.remove();
     showStatus(`<div><h2>Couldn't play this one.</h2><p>${escape(message)}</p><button data-retry>Retry video</button></div>`);
   };
-  const retryPlayback = message => {
+  const retryPlayback = async message => {
     if (disposed || retrying) return;
     if ((autoRetryCount.get(id) || 0) >= 2) return showError(`${message} Retry to request a fresh stream.`);
     retrying = true;
@@ -377,9 +472,18 @@ async function watch(id, current, controller, refresh) {
       library.history = [{ ...compact(info), position, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
       persist();
     }
+    freezeFrame(); playbackBusy = true; discardWarmWatch();
+    clearTimeout(stallTimer);
+    if (!video.paused) ignorePause = true;
     video.pause(); audio.pause();
-    showStatus('<div><span class="spinner" aria-hidden="true"></span><h2>Reconnecting…</h2><p>Refreshing this video’s stream.</p></div>');
-    setTimeout(() => { if (!disposed) route(true); }, 600);
+    bufferHint.textContent = 'Reconnecting…'; bufferHint.hidden = false;
+    try {
+      const fresh = await shortInfo(id, controller.signal, true);
+      if (disposed) return;
+      if (!reloadStreams) return showError(message);
+      reloadStreams(fresh, position, playingIntent);
+    } catch (error) { if (!disposed && error.name !== 'AbortError') showError(error.message); }
+    finally { retrying = false; }
   };
   video.onerror = () => retryPlayback('The video stream was interrupted.');
   try {
@@ -393,6 +497,59 @@ async function watch(id, current, controller, refresh) {
     const savedPosition = library.history.find(v => v.id === id)?.position || 0;
     $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
     bindInfoActions(id);
+    library.queue = library.queue.filter(v => v.id !== id); persist();
+    $('.watch-related').insertAdjacentHTML('afterbegin', '<section id="watch-queue"></section>');
+    renderQueue();
+    $('.player-tools').insertAdjacentHTML('beforeend', '<label>Audio <select id="audio-language" aria-label="Audio language"></select></label><label>Captions <select id="captions" aria-label="Captions"></select></label><button id="pip-toggle" type="button">Picture-in-picture</button><button id="mini-toggle" type="button">Mini-player</button>');
+    $('#quality').insertAdjacentHTML('afterbegin', '<option value="auto">Auto</option>');
+    let selectedQuality = startQuality(info), lastQualityChange = Date.now(), audioTrack = preferredAudio(info);
+    let autoMode = !preferences.qualityHeight;
+    const updateAutoLabel = () => { $('#quality').querySelector('[value="auto"]').textContent = `Auto (${info.qualities[selectedQuality].label})`; };
+    $('#quality').value = autoMode ? 'auto' : String(selectedQuality);
+    const updateTracks = () => {
+      const tracks = info.audioTracks || [];
+      $('#audio-language').innerHTML = '<option value="preferred-en">English (preferred)</option><option value="original">Original</option>' +
+        tracks.map(t => `<option value="${escape(t.id)}">${escape(t.label)}</option>`).join('');
+      const preference = !preferences.audioLanguage || preferences.audioLanguage === 'en' ? 'preferred-en' : preferences.audioLanguage;
+      $('#audio-language').value = tracks.some(t => t.id === preference) || ['preferred-en', 'original'].includes(preference) ? preference : 'preferred-en';
+      $('#audio-language').disabled = !tracks.length;
+      $('#audio-language').title = audioTrack ? `Playing: ${audioTrack.label}` : 'Default audio';
+      $('#captions').innerHTML = '<option value="">Off</option>' + (info.captions || []).map(t => `<option value="${escape(t.language)}">${escape(t.label)}</option>`).join('');
+      $('#captions').value = (info.captions || []).some(t => t.language === preferences.captions) ? preferences.captions : '';
+      $('#captions').disabled = !(info.captions || []).length;
+    };
+    const setCaptions = async () => {
+      const request = ++captionRequest;
+      video.querySelectorAll('track').forEach(t => t.remove());
+      if (captionBlob) { URL.revokeObjectURL(captionBlob); captionBlob = null; }
+      const caption = info.captions?.find(t => t.language === $('#captions').value);
+      if (!caption) return;
+      try {
+        const response = await fetch(caption.src, { signal: controller.signal });
+        if (!response.ok) throw new Error('Captions could not load. Try selecting them again.');
+        const text = await response.text();
+        if (disposed || request !== captionRequest) return;
+        if (!text.trimStart().startsWith('WEBVTT')) throw new Error('Captions are unavailable.');
+        const track = document.createElement('track');
+        track.kind = 'subtitles'; track.srclang = caption.language; track.label = caption.label; track.default = true;
+        captionBlob = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
+        track.src = captionBlob;
+        video.append(track); track.track.mode = 'showing';
+      } catch (error) {
+        if (!disposed && request === captionRequest && error.name !== 'AbortError') { toast(error.message); $('#captions').value = ''; }
+      }
+    };
+    updateTracks(); setCaptions();
+    $('#captions').onchange = () => { preferences.captions = $('#captions').value; savePreferences(); setCaptions(); };
+    $('#mini-toggle').onclick = () => { enableMiniPlayer(id); location.hash = '#home'; };
+    $('#pip-toggle').onclick = async () => {
+      try {
+        if (document.pictureInPictureElement === video) await document.exitPictureInPicture();
+        else if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
+          await video.requestPictureInPicture(); enableMiniPlayer(id);
+        } else { enableMiniPlayer(id); location.hash = '#home'; }
+      } catch { enableMiniPlayer(id); location.hash = '#home'; toast('Using the in-app mini-player on this device.'); }
+    };
     const syncAudio = () => {
       if (!separate || disposed) return;
       if (Math.abs(audio.currentTime - video.currentTime) > .35 && audio.readyState) audio.currentTime = video.currentTime;
@@ -437,7 +594,7 @@ async function watch(id, current, controller, refresh) {
       status.parentElement.append(button);
     };
     const playAudio = () => {
-      if (!separate || disposed) return;
+      if (!separate || disposed || video.paused || video.readyState < 3 || video.seeking) return;
       syncAudio();
       audio.play().then(() => $('#unmute')?.remove()).catch(error => {
         if (error.name === 'NotAllowedError' && !disposed) showUnmute();
@@ -471,52 +628,129 @@ async function watch(id, current, controller, refresh) {
     const loadQuality = (index, position = 0, autoplay = false) => {
       const selected = info.qualities[index];
       const rate = Number($('#speed')?.value) || 1;
+      freezeFrame(); switching = true; playingIntent = autoplay;
+      audioBuffering = false; clearTimeout(stallTimer);
+      selectedQuality = index; lastQualityChange = Date.now(); updateAutoLabel();
+      playbackBusy = true; playbackBufferAhead = 0; discardWarmWatch();
+      if (!video.paused) ignorePause = true;
       video.pause(); audio.pause(); separate = selected.separateAudio;
       audioIndex = 0;
-      audioFallbacks = info.audioFallbacks || [];
+      audioFallbacks = audioTrack?.fallbacks || info.audioFallbacks || [];
       if (video.error || video.getAttribute('src') !== selected.src) video.src = selected.src;
       video.playbackRate = rate;
       audio.playbackRate = rate;
-      if (separate && info.audio) {
-        if (audio.error || audio.getAttribute('src') !== info.audio) audio.src = info.audio;
+      const audioSource = audioTrack?.src || info.audio;
+      if (separate && audioSource) {
+        if (audio.error || audio.getAttribute('src') !== audioSource) audio.src = audioSource;
       } else { audio.removeAttribute('src'); audio.load(); }
       const restorePosition = () => {
         if (disposed) return;
         if (position) video.currentTime = Math.min(position, Math.max(0, video.duration - 1));
         syncAudio();
+        if (autoplay) startPlayback();
+        else { switching = false; playbackBusy = false; }
       };
       video.onloadedmetadata = restorePosition;
       if (video.readyState >= 1) restorePosition();
-      if (autoplay) startPlayback(); else clearStatus();
+      if (autoplay && !position) startPlayback(); else clearStatus();
     };
-    video.onplay = () => { if (video.readyState >= 3) playAudio(); };
-    video.onplaying = () => { hideLoading(); clearStatus(); playAudio(); healthySince = Date.now(); };
+    reloadStreams = (fresh, position, autoplay) => {
+      const height = info.qualities[selectedQuality].height;
+      info = fresh; audioTrack = preferredAudio(info);
+      const index = info.qualities.findIndex(q => q.height === height);
+      $('#quality').innerHTML = '<option value="auto">Auto</option>' + qualityOptions(info);
+      $('#quality').value = autoMode ? 'auto' : String(index >= 0 ? index : startQuality(info));
+      updateTracks(); setCaptions();
+      loadQuality(index >= 0 ? index : startQuality(info), position, autoplay);
+    };
+    $('#audio-language').onchange = () => {
+      preferences.audioLanguage = $('#audio-language').value; savePreferences();
+      audioTrack = preferredAudio(info); updateTracks();
+      loadQuality(selectedQuality, video.currentTime, !video.paused);
+    };
+    video.onplay = () => { playingIntent = true; if (video.readyState >= 3) playAudio(); };
+    video.onplaying = () => {
+      switching = false; playbackBusy = false; clearTimeout(stallTimer);
+      bufferHint.textContent = 'Buffering…'; hideLoading(); clearStatus(); playAudio(); healthySince = Date.now();
+    };
     audio.onplaying = () => { $('#unmute')?.remove(); };
-    video.onpause = () => { audio.pause(); clearTimeout(waitingTimer); bufferHint.hidden = true; };
-    video.onwaiting = () => { audio.pause(); healthySince = 0; showBuffering(); };
+    audio.onwaiting = () => {
+      if (!separate || disposed || retrying || switching || video.paused || video.seeking) return;
+      audioBuffering = true; playbackBusy = true; discardWarmWatch();
+      if (!video.paused) ignorePause = true;
+      video.pause(); audio.pause();
+      bufferHint.textContent = 'Buffering audio…'; bufferHint.hidden = false;
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => { if (!disposed && audioBuffering) retryPlayback('The audio stream stalled.'); }, 8000);
+    };
+    audio.oncanplay = () => {
+      if (!audioBuffering || disposed) return;
+      audioBuffering = false; clearTimeout(stallTimer);
+      if (playingIntent) startPlayback();
+    };
+    video.onpause = () => {
+      if (ignorePause) { ignorePause = false; return; }
+      audio.pause();
+      if (!switching && !retrying && !video.error) { playingIntent = false; clearTimeout(stallTimer); }
+      clearTimeout(waitingTimer); if (!retrying) bufferHint.hidden = true;
+    };
+    video.onwaiting = () => {
+      audio.pause(); healthySince = 0; playbackBusy = true; discardWarmWatch(); showBuffering();
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        if (disposed || !playingIntent || video.readyState >= 3) return;
+        const lower = info.qualities.map((q, i) => ({ ...q, i })).filter(q => q.height < info.qualities[selectedQuality].height).sort((a, b) => b.height - a.height)[0];
+        if (autoMode && lower && Date.now() - lastQualityChange > 4000) {
+          loadQuality(lower.i, video.currentTime, true);
+        } else retryPlayback('Playback stalled.');
+      }, 8000);
+    };
     video.onseeking = () => { audio.pause(); syncAudio(); showBuffering(); };
-    video.onseeked = () => { syncAudio(); if (!video.paused) playAudio(); };
+    video.onseeked = () => { syncAudio(); if (!video.paused) playAudio(); else frozenFrame.hidden = true; };
     video.onvolumechange = () => {
       syncAudio(); refreshVolumeUi();
       preferences.volume = video.volume; preferences.muted = video.muted; savePreferences();
     };
     video.onratechange = syncAudio;
-    video.onended = () => { audio.pause(); saveProgress(); };
+    video.onended = () => {
+      audio.pause(); saveProgress(); playingIntent = false; clearTimeout(stallTimer);
+      if (!preferences.autoplay) return;
+      const next = library.queue.shift() || videos.get($('#related a[href^="#watch="]')?.getAttribute('href').slice(7));
+      persist(); renderQueue();
+      if (next && next.id !== id) location.hash = `#watch=${next.id}`;
+    };
     video.ontimeupdate = () => {
       if (healthySince && Date.now() - healthySince > 10000) autoRetryCount.delete(id);
       if (Date.now() - lastSave > 5000) { saveProgress(); lastSave = Date.now(); }
     };
-    syncTimer = setInterval(syncAudio, 1000);
+    const ahead = media => {
+      for (let i = 0; i < media.buffered.length; i++) {
+        if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) >= media.currentTime) return media.buffered.end(i) - media.currentTime;
+      }
+      return 0;
+    };
+    syncTimer = setInterval(() => {
+      syncAudio();
+      playbackBufferAhead = Math.min(ahead(video), separate ? ahead(audio) : Infinity);
+      if (playbackBufferAhead < 3) discardWarmWatch();
+      if (!autoMode || disposed || retrying || switching || video.paused || !healthySince ||
+          Date.now() - healthySince < 12000 || Date.now() - lastQualityChange < 25000 || playbackBufferAhead < 15) return;
+      const cap = navigator.connection?.saveData || /2g|3g/.test(navigator.connection?.effectiveType || '') ? 480 : 1080;
+      const higher = info.qualities.map((q, i) => ({ ...q, i })).filter(q => q.height > info.qualities[selectedQuality].height && q.height <= cap).sort((a, b) => a.height - b.height)[0];
+      if (higher) loadQuality(higher.i, video.currentTime, true);
+    }, 1000);
     $('#quality').onchange = () => {
       const playing = !video.paused;
-      loadQuality(Number($('#quality').value), video.currentTime, playing);
+      autoMode = $('#quality').value === 'auto';
+      preferences.qualityHeight = autoMode ? null : info.qualities[Number($('#quality').value)].height; savePreferences();
+      loadQuality(autoMode ? startQuality(info) : Number($('#quality').value), video.currentTime, playing);
     };
     $('#speed').onchange = () => { video.playbackRate = Number($('#speed').value); };
-    loadQuality(Number($('#quality').value), savedPosition, true);
+    loadQuality(selectedQuality, savedPosition, true);
     try {
       const related = await api(`/api/search?q=${encodeURIComponent(info.channel)}&page=1`, controller.signal);
-      if (current === generation) $('#related').innerHTML = `<div class="grid">${related.videos.filter(v => v.id !== id).slice(0, 8).map(card).join('')}</div>`;
-    } catch { if (current === generation) $('#related').innerHTML = '<p class="muted">More videos are unavailable right now.</p>'; }
+      if (!disposed) $('#related').innerHTML = `<div class="grid">${related.videos.filter(v => v.id !== id).slice(0, 8).map(card).join('')}</div>`;
+    } catch { if (!disposed) $('#related').innerHTML = '<p class="muted">More videos are unavailable right now.</p>'; }
   } catch (error) {
     if (current !== generation || error.name === 'AbortError') return;
     showError(error.message); $('#related').innerHTML = '';
@@ -605,7 +839,8 @@ async function reel(id, current, controller) {
       clearPlayer(pair);
       pair.video.src = quality.src;
       pair.audio.muted = true;
-      const audioSrc = quality.separateAudio && data.audio ? data.audio : '';
+      const selectedAudio = preferredAudio(data)?.src || data.audio;
+      const audioSrc = quality.separateAudio && selectedAudio ? selectedAudio : '';
       if (audioSrc) pair.audio.src = audioSrc;
       pair.video.load(); pair.audio.load();
       prefetched = { id, slot, audioSrc };
@@ -784,14 +1019,16 @@ async function reel(id, current, controller) {
       const quality = qualities.find(q => q.height === 720) || qualities[0];
       separate = quality.separateAudio;
       audioIndex = 0;
-      audioFallbacks = info.audioFallbacks || [];
+      const selectedAudio = preferredAudio(info);
+      audioFallbacks = selectedAudio?.fallbacks || info.audioFallbacks || [];
+      const audioSrc = selectedAudio?.src || info.audio;
       if (preloaded) {
         // Keep the promoted element's buffered source. Audio may not have been
         // preloaded if this format carries its audio in the video stream.
-        if (separate && !preloaded.audioSrc && info.audio) audio.src = info.audio;
+        if (separate && !preloaded.audioSrc && audioSrc) audio.src = audioSrc;
       } else {
         video.src = quality.src;
-        if (separate && info.audio) audio.src = info.audio;
+        if (separate && audioSrc) audio.src = audioSrc;
       }
       applyVolume();
       const restorePosition = () => {
@@ -810,8 +1047,6 @@ async function reel(id, current, controller) {
           $('#start-play').onclick = () => { clearStatus(); video.play().then(playAudio).catch(() => recover('Playback was interrupted.')); };
         } else if (error.name !== 'AbortError') recover('Playback was interrupted.');
       });
-      const next = list[index + 1];
-      if (next) shortInfo(next.id, controller.signal).catch(() => {});
     } catch (error) {
       if (disposed || current !== generation || error.name === 'AbortError') return;
       showStatus(`<div><h2>Couldn't play this one.</h2><p>${escape(error.message)}</p><button data-retry>Retry Short</button></div>`);
@@ -859,7 +1094,13 @@ async function reel(id, current, controller) {
     };
     a.onplaying = () => { if (a === audio) $('#unmute')?.remove(); };
     v.onpause = () => { if (v !== video) return; clearLoadHint(); audio.pause(); refreshControls(); };
-    v.onwaiting = () => { if (v !== video) return; audio.pause(); healthySince = 0; if (!video.paused) showLoadHintSoon(loadToken); };
+    v.onwaiting = () => {
+      if (v !== video) return;
+      audio.pause(); healthySince = 0;
+      prefetchRequest++; prefetched = null;
+      clearPlayer(players[activePlayer === 0 ? 1 : 0]);
+      if (!video.paused) showLoadHintSoon(loadToken);
+    };
     v.onseeking = () => { if (v !== video) return; audio.pause(); syncAudio(); updateProgress(); };
     v.onseeked = () => { if (v !== video) return; syncAudio(); updateProgress(); if (!video.paused) playAudio(); };
     v.ondurationchange = () => { if (v === video) updateProgress(); };
@@ -981,6 +1222,27 @@ async function reel(id, current, controller) {
 
 let routeController;
 async function route(refresh = false) {
+  const destination = location.hash.slice(1) || 'home';
+  if (miniSession) {
+    if (destination === `watch=${miniSession.id}` && refresh !== true && miniSession.detached) {
+      generation++; routeController?.abort(); cleanup();
+      main.className = 'watch-page'; main.replaceChildren(); movePlayer(miniSession.layout, main);
+      cleanup = miniSession.cleanup; routeController = miniSession.controller;
+      miniSession.detached = false; miniSession.host.hidden = true;
+      document.title = `${$('#watch-info h1')?.textContent || 'Video'} — Dinosour`;
+      document.querySelectorAll('[data-nav]').forEach(a => { a.classList.remove('active'); a.removeAttribute('aria-current'); });
+      $('#search').value = ''; updateSearch();
+      closeNavigation(); window.scrollTo(0, 0); return;
+    }
+    if (destination.startsWith('watch=') || destination.startsWith('short=')) {
+      if (miniSession.detached) miniSession.cleanup();
+      miniSession.host.remove(); miniSession = null;
+      if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    } else if (!miniSession.detached) {
+      miniSession.host.hidden = false; movePlayer(miniSession.layout, miniSession.host);
+      miniSession.detached = true; cleanup = () => {}; routeController = null;
+    }
+  }
   generation++;
   const current = generation;
   routeController?.abort(); cleanup(); cleanup = () => {};
@@ -1076,7 +1338,7 @@ document.addEventListener('keydown', event => {
   }
 });
 window.addEventListener('hashchange', route);
-window.addEventListener('pagehide', () => cleanup());
+window.addEventListener('pagehide', () => { cleanup(); if (miniSession?.detached) miniSession.cleanup(); });
 route();
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

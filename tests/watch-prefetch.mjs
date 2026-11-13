@@ -16,7 +16,12 @@ const item = { id: 'aqz-KE-bpKQ', title: 'Big Buck Bunny', channel: 'Blender', t
 const info = { ...item, duration: 40, qualities: [{ label: '720p', height: 720, src: '/fixture.mp4', separateAudio: true }], audio: '/fixture.m4a' };
 for (const [ext, type] of [['mp4', 'video/mp4'], ['m4a', 'audio/mp4']]) {
   const body = await readFile(`test-results/watch-fixture.${ext}`);
-  await page.route(`**/fixture.${ext}`, route => route.fulfill({ contentType: type, body }));
+  await page.route(`**/fixture.${ext}`, route => {
+    const range = route.request().headers().range?.match(/^bytes=(\d+)-(\d*)$/);
+    if (!range) return route.fulfill({ contentType: type, headers: { 'accept-ranges': 'bytes' }, body });
+    const start = Number(range[1]), end = range[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+    return route.fulfill({ status: 206, contentType: type, headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${body.length}` }, body: body.subarray(start, end + 1) });
+  });
 }
 await page.route('**/api/thumb/*', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="teal"/></svg>' }));
 await page.route('**/api/search?*', route => route.fulfill({ json: { videos: [item], continuation: null } }));

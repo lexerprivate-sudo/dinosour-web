@@ -16,6 +16,7 @@
     "test:shorts": "node tests/shorts.mjs",
     "test:prefetch": "node tests/prefetch.mjs",
     "test:watch-prefetch": "node tests/watch-prefetch.mjs",
+    "test:playback-features": "node tests/playback-features.mjs",
     "build:android": "cd android && gradlew.bat assembleRelease"
   },
   "engines": {

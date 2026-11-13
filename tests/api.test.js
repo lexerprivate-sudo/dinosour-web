@@ -13,6 +13,7 @@ test('rejects invalid IDs, pages, unknown streams and cross-origin requests', as
     assert.equal((await fetch(base + path)).status, 400);
   }
   assert.equal((await fetch(base + '/api/stream/invalid')).status, 410);
+  assert.equal((await fetch(base + '/api/captions/invalid')).status, 410);
   assert.equal((await fetch(base + '/api/search?q=x', { headers: { origin: 'https://example.com' } })).status, 403);
   assert.equal((await fetch(base, { method: 'POST' })).status, 405);
 });
