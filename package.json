@@ -1,0 +1,26 @@
+{
+  "name": "dinosour",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A local, account-free YouTube viewer",
+  "scripts": {
+    "start": "node server.js --open",
+    "serve": "node server.js",
+    "check": "node --check server.js && node --check youtube-search.js && node --check public/app.js && node --check public/sw.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser.mjs",
+    "test:pwa": "node tests/pwa-browser.mjs",
+    "test:feed": "node tests/feed.mjs",
+    "test:recovery": "node tests/recovery.mjs",
+    "test:shorts": "node tests/shorts.mjs",
+    "test:prefetch": "node tests/prefetch.mjs",
+    "build:android": "cd android && gradlew.bat assembleRelease"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
+  }
+}

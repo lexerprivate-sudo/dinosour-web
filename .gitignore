@@ -1,0 +1,21 @@
+node_modules/
+test-results/
+server.log
+server.err
+short-info.err
+short-info.json
+*.tmp.mjs
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+android/keystore/
+public/download/*.apk
+*.apk
+
+# Local research/evidence artifacts, not part of the app
+GHIDRA-FINDINGS.md
+REA-FINDINGS.md
+ghidra-*.log
+rea-*.json

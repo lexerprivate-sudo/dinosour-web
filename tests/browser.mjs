@@ -1,0 +1,66 @@
+import { chromium } from '@playwright/test';
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const errors = [];
+page.on('pageerror', error => errors.push(error.message));
+page.setDefaultTimeout(90000);
+try {
+  await page.goto('http://127.0.0.1:3210', { waitUntil: 'domcontentloaded' });
+  await page.locator('#results .card').first().waitFor();
+  console.log('Home loaded');
+  await mkdir('test-results', { recursive: true });
+  await page.screenshot({ path: 'test-results/desktop.png', fullPage: true });
+  await page.locator('#search').fill('big buck bunny');
+  await page.locator('.search-submit').click();
+  await page.locator('h1').filter({ hasText: 'big buck bunny' }).waitFor();
+  await page.locator('#results .card').first().waitFor();
+  console.log('Search loaded');
+  assert.ok(await page.locator('#results .card').count() > 0);
+  await page.locator('[data-save]').first().click({ force: true });
+  await page.locator('[data-nav="saved"]').click();
+  await page.locator('.card h3 a').first().waitFor();
+  assert.match(await page.locator('.card h3').first().textContent(), /Big Buck Bunny/i);
+  await page.locator('#search').fill('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+  await page.locator('.search-submit').click();
+  console.log('Opening player');
+  await page.waitForFunction(() => {
+    const v = document.querySelector('video'), a = document.querySelector('audio');
+    return v.currentTime > 3 && !v.paused && a.currentTime > 2 && !a.paused;
+  });
+  const initial = await page.evaluate(() => ({ video: document.querySelector('video').currentTime, audio: document.querySelector('audio').currentTime }));
+  assert.ok(Math.abs(initial.video - initial.audio) < 1, JSON.stringify(initial));
+  assert.equal(await page.locator('#player-status').isHidden(), true, 'only the native player spinner should be visible while loading');
+  console.log('Real YouTube video + audio playing:', initial);
+  await page.locator('#volume').fill('0.4');
+  await page.waitForTimeout(500);
+  assert.ok(await page.evaluate(() => Math.abs(document.querySelector('audio').volume - 0.4) < 0.01), 'app volume slider did not reach the audio track');
+  await page.locator('#mute-toggle').click();
+  assert.equal(await page.evaluate(() => document.querySelector('audio').muted), true, 'mute did not reach the audio track');
+  await page.locator('#mute-toggle').click();
+  await page.evaluate(() => { document.querySelector('video').currentTime = 65; });
+  await page.waitForFunction(() => document.querySelector('video').currentTime > 67 && document.querySelector('audio').currentTime > 66);
+  await page.locator('#speed').selectOption('1.5');
+  assert.equal(await page.locator('video').evaluate(v => v.playbackRate), 1.5);
+  await page.locator('#quality').selectOption({ label: '360p' });
+  await page.waitForFunction(() => !document.querySelector('video').paused && document.querySelector('video').currentTime > 69);
+  await page.locator('#like').click();
+  await page.screenshot({ path: 'test-results/watch.png', fullPage: true });
+  await page.locator('[data-nav="history"]').click();
+  await page.locator('.card h3 a').first().waitFor();
+  await page.reload();
+  assert.ok(await page.locator('.card').count() > 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('[data-nav="home"]').click();
+  await page.locator('#results .card').first().waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });
+  assert.deepEqual(errors, []);
+  console.log('PASS: live search, saved library, real playback/audio sync, volume/mute, no duplicate loading overlay, seeking, speed, quality, likes, persisted history and mobile layout.');
+} catch (error) {
+  console.error('FAILED:', error.message, '\nPAGE:', await page.locator('main').innerText());
+  await page.screenshot({ path: 'test-results/failure.png' });
+  throw error;
+} finally { await browser.close(); }
