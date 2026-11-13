@@ -15,6 +15,7 @@
     "test:recovery": "node tests/recovery.mjs",
     "test:shorts": "node tests/shorts.mjs",
     "test:prefetch": "node tests/prefetch.mjs",
+    "test:watch-prefetch": "node tests/watch-prefetch.mjs",
     "build:android": "cd android && gradlew.bat assembleRelease"
   },
   "engines": {

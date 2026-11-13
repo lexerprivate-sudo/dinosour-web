@@ -237,10 +237,90 @@ function bindInfoActions(id) {
   };
 }
 
+// Warm one likely next video, then adopt the same media elements on navigation.
+// Reusing elements retains their buffered bytes instead of downloading them twice.
+let warmWatch = null, warmIntentTimer;
+function discardWarmWatch() {
+  if (!warmWatch) return;
+  clearTimeout(warmWatch.expiry);
+  warmWatch.controller.abort();
+  for (const media of [warmWatch.video, warmWatch.audio]) {
+    media.removeAttribute('src'); media.load();
+  }
+  warmWatch = null;
+}
+function prepareWatch(id) {
+  if (navigator.connection?.saveData || /(^|-)2g$/.test(navigator.connection?.effectiveType || '')) return;
+  if (warmWatch?.id === id || location.hash === `#watch=${id}`) return;
+  discardWarmWatch();
+  const entry = { id, controller: new AbortController(), video: document.createElement('video'), audio: document.createElement('audio') };
+  warmWatch = entry;
+  entry.video.preload = entry.audio.preload = 'auto';
+  entry.video.playsInline = true;
+  entry.promise = api(`/api/video?id=${id}`, entry.controller.signal).then(info => {
+    if (entry.controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const quality = info.qualities.find(q => q.height === 720) || info.qualities[0];
+    entry.video.src = quality.src;
+    if (quality.separateAudio && info.audio) entry.audio.src = info.audio;
+    return info;
+  });
+  entry.promise.catch(() => { if (warmWatch === entry) discardWarmWatch(); });
+  entry.expiry = setTimeout(() => { if (warmWatch === entry) discardWarmWatch(); }, 45000);
+}
+for (const event of ['pointerover', 'focusin', 'pointerdown']) {
+  main.addEventListener(event, e => {
+    const link = e.target.closest('a[href^="#watch="]');
+    if (!link) return;
+    clearTimeout(warmIntentTimer);
+    const id = link.getAttribute('href').slice(7);
+    if (!/^[\w-]{11}$/.test(id)) return;
+    if (event === 'pointerdown') prepareWatch(id);
+    else warmIntentTimer = setTimeout(() => prepareWatch(id), 180);
+  });
+}
+main.addEventListener('pointerout', e => {
+  const link = e.target.closest('a[href^="#watch="]');
+  if (link && !link.contains(e.relatedTarget)) clearTimeout(warmIntentTimer);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clearTimeout(warmIntentTimer); discardWarmWatch(); }
+});
+
 async function watch(id, current, controller, refresh) {
+  clearTimeout(warmIntentTimer);
+  const warmed = !refresh && warmWatch?.id === id ? warmWatch : null;
+  if (warmed) { clearTimeout(warmed.expiry); warmWatch = null; }
+  else discardWarmWatch();
   main.className = 'watch-page';
   main.innerHTML = `<div class="watch-layout"><section class="watch-primary"><div class="player-shell"><video id="video" controls playsinline preload="auto"></video><audio id="audio" preload="auto"></audio><div id="player-status" class="player-status" hidden></div></div><div id="watch-info"></div></section><aside class="watch-related"><h2>More to watch</h2><div id="related">${skeleton()}</div></aside></div>`;
+  if (warmed) {
+    warmed.video.id = 'video'; warmed.audio.id = 'audio';
+    $('#video').replaceWith(warmed.video); $('#audio').replaceWith(warmed.audio);
+  }
   const video = $('#video'), audio = $('#audio'), status = $('#player-status');
+  const preview = videos.get(id);
+  video.poster = preview?.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
+  video.controls = false;
+  const loading = document.createElement('div');
+  loading.className = 'watch-loading';
+  loading.setAttribute('role', 'status');
+  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><span class="spinner" aria-hidden="true"></span><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
+  video.parentElement.append(loading);
+  const bufferHint = document.createElement('div');
+  bufferHint.className = 'watch-buffer-hint'; bufferHint.hidden = true;
+  bufferHint.setAttribute('role', 'status'); bufferHint.textContent = 'Buffering…';
+  video.parentElement.append(bufferHint);
+  let waitingTimer, hasFrame = false;
+  const hideLoading = () => {
+    hasFrame = true; loading.hidden = true; video.controls = true;
+    clearTimeout(waitingTimer); bufferHint.hidden = true;
+  };
+  const showBuffering = () => {
+    clearTimeout(waitingTimer);
+    if (hasFrame) waitingTimer = setTimeout(() => {
+      if (!disposed && !video.paused && video.readyState < 3) bufferHint.hidden = false;
+    }, 500);
+  };
   const clearStatus = () => { status.innerHTML = ''; status.hidden = true; };
   const showStatus = html => { status.innerHTML = html; status.hidden = false; };
   let disposed = false, syncTimer, lastSave = 0, separate = false, info, audioFallbacks = [], audioIndex = 0, healthySince = 0, retrying = false;
@@ -250,12 +330,14 @@ async function watch(id, current, controller, refresh) {
     persist();
   };
   cleanup = () => {
-    saveProgress(); disposed = true; clearInterval(syncTimer);
+    saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer);
+    warmed?.controller.abort();
     video.pause(); audio.pause();
     video.removeAttribute('src'); audio.removeAttribute('src'); video.load(); audio.load();
   };
   const showError = message => {
     if (disposed) return;
+    loading.hidden = true; bufferHint.hidden = true; clearTimeout(waitingTimer);
     video.pause(); audio.pause();
     $('#unmute')?.remove();
     showStatus(`<div><h2>Couldn't play this one.</h2><p>${escape(message)}</p><button data-retry>Retry video</button></div>`);
@@ -276,9 +358,12 @@ async function watch(id, current, controller, refresh) {
   };
   video.onerror = () => retryPlayback('The video stream was interrupted.');
   try {
-    info = await api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, controller.signal);
+    info = warmed
+      ? await warmed.promise.catch(() => api(`/api/video?id=${id}`, controller.signal))
+      : await api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, controller.signal);
     if (current !== generation) return;
     remember(info);
+    video.poster = info.thumb || video.poster;
     document.title = `${info.title} — Dinosour`;
     const savedPosition = library.history.find(v => v.id === id)?.position || 0;
     $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
@@ -336,11 +421,10 @@ async function watch(id, current, controller, refresh) {
     const startPlayback = () => {
       if (disposed) return;
       clearStatus();
-      // Start the media element immediately; the browser buffers while the
-      // native player shows its own spinner. There is no app loading overlay.
       video.play().then(playAudio).catch(error => {
         if (disposed) return;
         if (error.name === 'NotAllowedError') {
+          loading.hidden = true; video.controls = true;
           showStatus(`<div><button class="primary" id="start-play">▶ &nbsp; Play video</button><p>Your browser paused autoplay.</p></div>`);
           $('#start-play').onclick = () => {
             clearStatus();
@@ -365,23 +449,27 @@ async function watch(id, current, controller, refresh) {
       video.pause(); audio.pause(); separate = selected.separateAudio;
       audioIndex = 0;
       audioFallbacks = info.audioFallbacks || [];
-      video.src = selected.src;
+      if (video.error || video.getAttribute('src') !== selected.src) video.src = selected.src;
       video.playbackRate = rate;
       audio.playbackRate = rate;
-      if (separate && info.audio) audio.src = info.audio;
-      video.onloadedmetadata = () => {
+      if (separate && info.audio) {
+        if (audio.error || audio.getAttribute('src') !== info.audio) audio.src = info.audio;
+      } else { audio.removeAttribute('src'); audio.load(); }
+      const restorePosition = () => {
         if (disposed) return;
         if (position) video.currentTime = Math.min(position, Math.max(0, video.duration - 1));
         syncAudio();
       };
+      video.onloadedmetadata = restorePosition;
+      if (video.readyState >= 1) restorePosition();
       if (autoplay) startPlayback(); else clearStatus();
     };
-    video.onplay = playAudio;
-    video.onplaying = () => { playAudio(); healthySince = Date.now(); };
+    video.onplay = () => { if (video.readyState >= 3) playAudio(); };
+    video.onplaying = () => { hideLoading(); clearStatus(); playAudio(); healthySince = Date.now(); };
     audio.onplaying = () => { $('#unmute')?.remove(); };
-    video.onpause = () => audio.pause();
-    video.onwaiting = () => { audio.pause(); healthySince = 0; };
-    video.onseeking = () => { audio.pause(); syncAudio(); };
+    video.onpause = () => { audio.pause(); clearTimeout(waitingTimer); bufferHint.hidden = true; };
+    video.onwaiting = () => { audio.pause(); healthySince = 0; showBuffering(); };
+    video.onseeking = () => { audio.pause(); syncAudio(); showBuffering(); };
     video.onseeked = () => { syncAudio(); if (!video.paused) playAudio(); };
     video.onvolumechange = () => {
       syncAudio(); refreshVolumeUi();
@@ -871,6 +959,8 @@ async function route(refresh = false) {
   closeNavigation();
   const hash = location.hash.slice(1) || 'home';
   const value = decodeValue(hash);
+  clearTimeout(warmIntentTimer);
+  if (!hash.startsWith('watch=')) discardWarmWatch();
   document.querySelectorAll('[data-nav]').forEach(a => {
     let active = a.dataset.nav === hash || a.dataset.nav === value;
     if (a.dataset.nav === 'shorts') active = hash === 'shorts' || hash.startsWith('shorts=') || hash.startsWith('short=');

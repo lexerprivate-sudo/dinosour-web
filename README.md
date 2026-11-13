@@ -153,6 +153,22 @@ physical Android device.
 
 ## Android app and updates
 
+### Playback improvements
+
+- Hover, keyboard focus, or touch-down on a video prepares one upcoming video
+  and its audio. Opening it reuses the buffered media elements.
+- Speculative loading is skipped on Data Saver/2G connections, cancelled when
+  leaving the page, and expires after 45 seconds.
+- While playback starts, the thumbnail and a loading message replace the blank
+  player. Later buffering uses a small indicator over the last video frame.
+- Saved-position playback works with warmed players; playback controls wrap on
+  narrow phone screens.
+
+Run `npm run test:watch-prefetch` for the deterministic buffering/resume test.
+It requires FFmpeg on PATH to generate small local media fixtures.
+These are web-side changes: reopen the Android app to load them; no new APK is
+required.
+
 A signed Android shell is included:
 
 - Download the latest APK:

@@ -180,6 +180,13 @@ main:focus { outline: 0; }
 .player-shell { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; color: #f1f1f1; }
 .player-shell video { width: 100%; height: 100%; display: block; }
 .player-shell audio { display: none; }
+.watch-loading { position: absolute; inset: 0; background: #161616; overflow: hidden; pointer-events: none; }
+.watch-loading > img { width: 100%; height: 100%; object-fit: contain; opacity: .65; }
+.watch-loading-caption { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: linear-gradient(transparent, #000b); text-shadow: 0 1px 4px #000; }
+.watch-loading-caption > span:last-child { max-width: 90%; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-buffer-hint { position: absolute; top: 16px; left: 16px; padding: 8px 14px; border-radius: 20px; background: #000b; font-size: 13px; pointer-events: none; }
+.watch-loading[hidden], .watch-buffer-hint[hidden] { display: none; }
+.watch-page .player-status { z-index: 2; }
 .player-status { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; background: #0a0a0ae8; }
 .player-status:empty { display: none; }
 .player-status h2 { margin: 18px 0 8px; font-size: 18px; font-weight: 500; }
@@ -410,7 +417,7 @@ select { color: var(--text); background: var(--surface); border: 0; padding: 6px
   .watch-actions { gap: 8px; }
   .watch-actions .channel { width: 100%; margin-bottom: 8px; }
   .watch-actions button { flex: 1; font-size: 13px; }
-  .player-tools { gap: 12px; }
+  .player-tools { gap: 12px; flex-wrap: wrap; }
   .player-tools label { gap: 5px; }
   .description { font-size: 13px; }
   .shortcuts { display: none; }
