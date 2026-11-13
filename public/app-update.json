@@ -1,6 +1,6 @@
 {
-  "versionCode": 1,
-  "versionName": "1.0.0",
-  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-app/releases/latest/download/Dinosour.apk",
-  "notes": "Initial Android release with server settings, full-screen Shorts and in-app update checks."
+  "versionCode": 2,
+  "versionName": "1.0.1",
+  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/latest/download/DinosourWeb.apk",
+  "notes": "Dinosour Web 1.0.1 is a separate app from the original Dinosour, with its own package name, icon label and update feed. It can be installed alongside the original app."
 }

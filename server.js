@@ -303,13 +303,13 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': body.length, 'cache-control': 'no-store' });
       return res.end(req.method === 'HEAD' ? undefined : body);
     }
-    if (url.pathname === '/download/Dinosour.apk') {
-      const body = await readFile(root + 'download/Dinosour.apk').catch(() => null);
+    if (url.pathname === '/download/DinosourWeb.apk') {
+      const body = await readFile(root + 'download/DinosourWeb.apk').catch(() => null);
       if (!body) return json(res, 404, { error: 'The Android APK has not been built yet.' });
       res.writeHead(200, {
         'content-type': 'application/vnd.android.package-archive',
         'content-length': body.length,
-        'content-disposition': 'attachment; filename="Dinosour.apk"',
+        'content-disposition': 'attachment; filename="DinosourWeb.apk"',
         'cache-control': 'no-store',
       });
       return res.end(req.method === 'HEAD' ? undefined : body);

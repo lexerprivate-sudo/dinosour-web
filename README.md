@@ -83,7 +83,7 @@ npm run serve
 - Installable PWA: a web app manifest, maskable icons, and a network-first
   service worker. Chrome/Edge can install Dinosour from the address bar; iOS
   Safari can add it to the Home Screen.
-- Signed Android app (`Dinosour.apk`) with native server settings, a gear menu,
+- Signed Android app (`DinosourWeb.apk`) with native server settings, a gear menu,
   in-app update checks, and full-screen Shorts playback.
 - Clean YouTube-style layout with a collapsible sidebar, compact search, and
   dark/light appearance (remembered on your device).
@@ -156,12 +156,15 @@ physical Android device.
 A signed Android shell is included:
 
 - Download the latest APK:
-  <https://github.com/lexerprivate-sudo/dinosour-app/releases/latest>
-- Local copies: `C:\Users\Rave\Desktop\Dinosour.apk` and
-  `C:\Users\Rave\Desktop\Dinosour-1.0.0.apk`
-- Served by the backend at `/download/Dinosour.apk`
+  <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
+- Local copies: `C:\Users\Rave\Desktop\DinosourWeb.apk` and
+  `C:\Users\Rave\Desktop\DinosourWeb-1.0.1.apk`
+- Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- package `com.dinosour.app`, version `1.0.0`
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.0.1`
+
+This app installs alongside the original Dinosour from the `tot` project.
+It has its own Android package and GitHub repository.
 
 The shell is a small WebView app. It opens the Dinosour server, so the interface
 and features update on the web without a new APK. The Android shell only needs
@@ -180,7 +183,7 @@ is the backend. To use the app away from home, host the Node process on a VPS
    `http://192.168.1.59:3210`. Allow Node.js through the Windows firewall if
    prompted. The address can change if you reconnect to Wi-Fi; the app's gear
    settings let you correct it without reinstalling.
-2. Install `Dinosour.apk` from the [latest GitHub release](https://github.com/lexerprivate-sudo/dinosour-app/releases/latest)
+2. Install `DinosourWeb.apk` from the [latest GitHub release](https://github.com/lexerprivate-sudo/dinosour-web/releases/latest)
    or from the Desktop copy. Android will ask to allow installs from that app
    or source.
 3. Connect the phone to the same Wi-Fi, open Dinosour, and accept the prefilled
@@ -208,7 +211,7 @@ cd android
 
 The build needs JDK 17+ and Android SDK 35. `android/local.properties` points at
 the SDK on this computer. `build-apk.cmd` copies the result to the Desktop and to
-`public/download/Dinosour.apk`, which is what `/download/Dinosour.apk` serves.
+`public/download/DinosourWeb.apk`, which is what `/download/DinosourWeb.apk` serves.
 
 Version bumps go in **two** places:
 
@@ -229,9 +232,9 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-app>. The `v1.0.0` release hosts
-`Dinosour.apk`, and `public/app-update.json` points `apkUrl` at the stable
-`/releases/latest/download/Dinosour.apk` URL, which always serves the newest
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.0.1` release hosts
+`DinosourWeb.apk`, and `public/app-update.json` points `apkUrl` at the stable
+`/releases/latest/download/DinosourWeb.apk` URL, which always serves the newest
 release asset with that name.
 
 To publish a new Android version:
@@ -241,7 +244,7 @@ To publish a new Android version:
 3. Set the same `versionCode`/`versionName` in `public/app-update.json`. Leave
    `apkUrl` unchanged; the `latest/download` link follows new releases.
 4. Create a GitHub Release tagged `vX.Y.Z` and attach the built APK with the
-   exact name `Dinosour.apk`.
+   exact name `DinosourWeb.apk`.
 5. Commit and push the updated `public/app-update.json` so update checks report
    the new version.
 

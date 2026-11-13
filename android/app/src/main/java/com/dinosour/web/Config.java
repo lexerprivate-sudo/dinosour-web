@@ -1,4 +1,4 @@
-package com.dinosour.app;
+package com.dinosour.web;
 
 final class Config {
     // Prefilled in the first-run dialog. Change it in the app's settings if the

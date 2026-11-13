@@ -1,4 +1,4 @@
-package com.dinosour.app;
+package com.dinosour.web;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
