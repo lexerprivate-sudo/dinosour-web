@@ -155,8 +155,11 @@ physical Android device.
 
 A signed Android shell is included:
 
-- `C:\Users\Rave\Desktop\Dinosour.apk` (also `Dinosour-1.0.0.apk`)
-- served by the backend at `/download/Dinosour.apk`
+- Download the latest APK:
+  <https://github.com/lexerprivate-sudo/dinosour-app/releases/latest>
+- Local copies: `C:\Users\Rave\Desktop\Dinosour.apk` and
+  `C:\Users\Rave\Desktop\Dinosour-1.0.0.apk`
+- Served by the backend at `/download/Dinosour.apk`
 - Android 7.0+ (API 24), target API 34
 - package `com.dinosour.app`, version `1.0.0`
 
@@ -177,8 +180,9 @@ is the backend. To use the app away from home, host the Node process on a VPS
    `http://192.168.1.59:3210`. Allow Node.js through the Windows firewall if
    prompted. The address can change if you reconnect to Wi-Fi; the app's gear
    settings let you correct it without reinstalling.
-2. Copy `Dinosour.apk` to the phone (USB, Google Drive, or any file transfer) and
-   open it. Android will ask to allow installs from that app or source.
+2. Install `Dinosour.apk` from the [latest GitHub release](https://github.com/lexerprivate-sudo/dinosour-app/releases/latest)
+   or from the Desktop copy. Android will ask to allow installs from that app
+   or source.
 3. Connect the phone to the same Wi-Fi, open Dinosour, and accept the prefilled
    server address. If the PC's address changed, tap the **gear icon** in the top
    bar and enter the address printed by the LAN script.
@@ -224,14 +228,23 @@ installer. Android always asks for confirmation and requires **Install unknown
 apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
-For GitHub distribution:
+For GitHub distribution, this project is published at
+<https://github.com/lexerprivate-sudo/dinosour-app>. The `v1.0.0` release hosts
+`Dinosour.apk`, and `public/app-update.json` already points `apkUrl` at that
+asset.
 
-1. Create a repository and a Release such as `v1.1.0`.
-2. Attach the new APK to the Release.
-3. Set `apkUrl` in `public/app-update.json` to the release asset URL, for example
-   `https://github.com/USER/REPO/releases/download/v1.1.0/Dinosour.apk`.
-4. Bump the version, rebuild, publish the APK, and deploy the updated
-   `app-update.json`.
+To publish a new Android version:
+
+1. Increase `versionCode` and `versionName` in `android/app/build.gradle`.
+2. Run `build-apk.cmd` to build and sign the APK.
+3. Set the same `versionCode`/`versionName` in `public/app-update.json`, and
+   point `apkUrl` at the new release asset URL.
+4. Create a GitHub Release tagged `vX.Y.Z` and attach `Dinosour.apk`.
+5. Commit and push the updated `public/app-update.json` so update checks report
+   the new version.
+
+The separate `lexerprivate-sudo/dinosour` repository contains an older native
+Android app with its own updater. This project intentionally does not modify it.
 
 [Obtainium](https://github.com/ImranR98/Obtainium) is an alternative that watches
 GitHub Releases itself.
