@@ -230,16 +230,18 @@ Store.
 
 For GitHub distribution, this project is published at
 <https://github.com/lexerprivate-sudo/dinosour-app>. The `v1.0.0` release hosts
-`Dinosour.apk`, and `public/app-update.json` already points `apkUrl` at that
-asset.
+`Dinosour.apk`, and `public/app-update.json` points `apkUrl` at the stable
+`/releases/latest/download/Dinosour.apk` URL, which always serves the newest
+release asset with that name.
 
 To publish a new Android version:
 
 1. Increase `versionCode` and `versionName` in `android/app/build.gradle`.
 2. Run `build-apk.cmd` to build and sign the APK.
-3. Set the same `versionCode`/`versionName` in `public/app-update.json`, and
-   point `apkUrl` at the new release asset URL.
-4. Create a GitHub Release tagged `vX.Y.Z` and attach `Dinosour.apk`.
+3. Set the same `versionCode`/`versionName` in `public/app-update.json`. Leave
+   `apkUrl` unchanged; the `latest/download` link follows new releases.
+4. Create a GitHub Release tagged `vX.Y.Z` and attach the built APK with the
+   exact name `Dinosour.apk`.
 5. Commit and push the updated `public/app-update.json` so update checks report
    the new version.
 
