@@ -255,10 +255,26 @@ async function feed(query, current, controller, mode = 'video') {
     if (entries.some(entry => entry.isIntersecting)) load();
   }, { rootMargin: '650px 0px' });
   cleanup = () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  // Cache the first page per query locally so repeat visits paint instantly,
+  // then swap in fresh results when the network answers.
+  const bootKey = `dinosour.feed.v1:${query || 'home'}`;
+  let booted = false;
   const load = async () => {
     if (loading || ended || failed || current !== generation) return;
+    const firstPage = continuation === '';
     loading = true;
     $('#feed').setAttribute('aria-busy', 'true');
+    if (!initialized && firstPage && !shorts) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(bootKey) || 'null');
+        if (saved?.videos?.length) {
+          $('#feed').innerHTML = `<div class="grid" id="results">${saved.videos.slice(0, 18).map(card).join('')}</div><div id="feed-status" class="feed-status" role="status"></div>`;
+          initialized = true;
+          booted = true;
+          observer.observe($('#feed-status'));
+        }
+      } catch { /* localStorage unavailable */ }
+    }
     const status = $('#feed-status');
     if (status) status.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>Loading more ${shorts ? 'Shorts' : 'videos'}…</span>`;
     try {
@@ -276,6 +292,12 @@ async function feed(query, current, controller, mode = 'video') {
         $('#feed').innerHTML = `<div class="${shorts ? 'shorts-grid' : 'grid'}" id="results"></div><div id="feed-status" class="feed-status" role="status"></div>`;
         initialized = true;
         observer.observe($('#feed-status'));
+      } else if (booted) {
+        booted = false;
+        $('#results').innerHTML = '';
+      }
+      if (firstPage && !shorts) {
+        try { localStorage.setItem(bootKey, JSON.stringify(data.videos.slice(0, 18))); } catch { /* quota */ }
       }
       const fresh = data.videos.filter(v => { if (seen.has(v.id)) return false; seen.add(v.id); return true; });
       if (shorts) {
@@ -716,6 +738,18 @@ async function watch(id, current, controller, refresh) {
   }
   const video = $('#video'), audio = $('#audio'), status = $('#player-status');
   const preview = videos.get(id);
+  // Paint the header from the lightweight public player response (usually
+  // under a second) while yt-dlp resolves the actual streams; yt-dlp's answer
+  // replaces this panel when it arrives.
+  api(`/api/video-lite?id=${encodeURIComponent(id)}`, controller.signal).then(lite => {
+    if (disposed || !lite) return;
+    const info = $('#watch-info');
+    if (info && !info.innerHTML.trim()) {
+      info.innerHTML = `<h1 class="watch-title">${escape(lite.title)}</h1><p class="description-preview"><strong>${escape(lite.channel)}</strong>${lite.views ? ` · ${escape(views(lite.views))}` : ''}</p>`;
+    }
+    const caption = loading.querySelector('.watch-loading-caption span:last-child');
+    if (caption && caption.textContent === 'Preparing playback') caption.textContent = lite.title;
+  }).catch(() => {});
   video.poster = preview?.thumb || `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
   video.controls = false;
   const loading = document.createElement('div');

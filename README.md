@@ -2,7 +2,7 @@
 
 ## Windows desktop app
 
-Download [Dinosour Web Desktop 1.1.0](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.0/DinosourWeb-Setup-1.1.0.exe)
+Download [Dinosour Web Desktop 1.1.1](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.1/DinosourWeb-Setup-1.1.1.exe)
 and run the installer. Supports Windows 10/11 x64. Open **Dinosour Web** from
 the desktop or Start menu. Node, Chromium and yt-dlp are bundled; no terminal
 or separate runtime installation is needed. Internet access is required.
@@ -12,7 +12,7 @@ local origin preserves saved videos, topics, settings and history across app
 upgrades. Browser/Android libraries can be transferred using Settings backup
 export/import. Desktop updates are separate from Android releases.
 
-Desktop 1.1.0 keeps sound playing in the background: while media plays,
+Desktop 1.1.1 keeps sound playing in the background: while media plays,
 closing the window only hides it to the system tray (with a hint balloon the
 first time) and the tray icon offers Open/Quit; the Dinosour menu Quit always
 exits fully. The app also updates itself: it checks GitHub for a newer
@@ -27,10 +27,10 @@ The download is approximately 145 MB. Source and third-party notices are include
 in the release/tag; see `desktop/THIRD_PARTY_NOTICES.md`.
 
 Build locally: `npm ci`, `npm run build:desktop`. Output:
-`dist/DinosourWeb-Setup-1.1.0.exe`. Test the packaged app using
+`dist/DinosourWeb-Setup-1.1.1.exe`. Test the packaged app using
 `npm run test:desktop` (live internet required). Tests use an isolated profile.
 
-Desktop 1.0.1/1.1.0 use bounded 1 MB media requests with one chunk of
+Desktop 1.0.1+ uses bounded 1 MB media requests with one chunk of
 read-ahead per active track (64 MB shared cache), avoiding slow open-ended CDN
 responses. Auto quality no longer discards a healthy buffer to raise
 resolution mid-play. Upcoming Shorts preload after the current video's
@@ -39,11 +39,11 @@ reuse their buffered media.
 
 ## Android: open and watch
 
-The **1.2.0 Android app is standalone**: install `DinosourWeb.apk`, open it,
+The **1.2.1 Android app is standalone**: install `DinosourWeb.apk`, open it,
 and watch using Wi-Fi or mobile data. No PC, server address, tunnel, invite code,
 hosting account, or YouTube account is required. The interface and playback
 engine are bundled in the APK. Only public, unrestricted recorded videos are
-supported. 1.2.0 adds background playback: sound continues when you switch
+supported. 1.2.0+ adds background playback: sound continues when you switch
 apps or turn the screen off, backed by a foreground media service with a
 notification play/pause control; the app requests notification and wake-lock
 permissions for this.
@@ -331,10 +331,10 @@ A signed standalone Android build is included:
 
 - Download the latest APK:
   <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
-- Local copies: `releases\DinosourWeb-1.2.0.apk` in this project folder
+- Local copies: `releases\DinosourWeb-1.2.1.apk` in this project folder
 - Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.0`
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.1`
 - Opens directly to Home. Settings contain app information and update checks,
   with no server-address prompt.
 - Shows a native opening screen until the interface is ready, independently of
@@ -408,7 +408,7 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.0` release hosts
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.1` release hosts
 `DinosourWeb.apk`. Update metadata uses the version-specific APK URL so an update
 check cannot accidentally download an older asset while a release is publishing.
 The `/releases/latest/download/DinosourWeb.apk` link remains the easy sharing URL.

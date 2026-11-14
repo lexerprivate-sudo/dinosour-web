@@ -133,6 +133,31 @@ async function reelSequence(continuation) {
   };
 }
 
+// A lightweight read of the public player response: enough for the watch
+// header while yt-dlp resolves the actual streams.
+export async function liteDetails(id) {
+  try {
+    const response = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: YOUTUBE_HEADERS,
+      body: JSON.stringify({ context: CONTEXT, videoId: id, contentCheckOk: true, racyCheckOk: true }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const details = (await response.json()).videoDetails;
+    if (!details?.title) return null;
+    return {
+      id,
+      title: details.title,
+      channel: details.author || 'YouTube',
+      views: Number(details.viewCount) || 0,
+      published: details.publishDate || '',
+      duration: Number(details.lengthSeconds) || 0,
+      thumb: `/api/thumb/${id}`,
+    };
+  } catch { return null; }
+}
+
 export async function shortsFeed(continuation) {
   let entries = [], next = null;
   if (continuation) {

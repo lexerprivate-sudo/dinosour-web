@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { search, shortsFeed, shortsPool } from './youtube-search.js';
+import { search, shortsFeed, shortsPool, liteDetails } from './youtube-search.js';
 import { selectAudioFormats, audioTrackGroups } from './audio-formats.js';
 import { createMediaChunks } from './media-chunks.js';
 
@@ -221,13 +221,27 @@ function extract(args) {
   });
 }
 
-async function cached(key, ttl, loader) {
+async function cached(key, ttl, loader, { stale = 0 } = {}) {
   const found = cache.get(key);
-  if (found && found.expires > Date.now()) return found.value;
-  const value = loader();
-  cache.set(key, { value, expires: Date.now() + ttl });
+  const now = Date.now();
+  if (found && found.expires > now) return found.value;
+  if (found && stale > 0 && found.expires + stale > now) {
+    // Serve the stale entry immediately and refresh it in the background so
+    // repeat visits stay instant even after the fresh window lapses.
+    if (!found.refreshing) {
+      const refresh = Promise.resolve().then(() => loader());
+      const store = refresh.then(value => cache.set(key, { value, expires: Date.now() + ttl }))
+        .catch(() => { const item = cache.get(key); if (item && item.refreshing) cache.delete(key); })
+        .finally(() => { const item = cache.get(key); if (item) item.refreshing = false; });
+      found.refreshing = true;
+      store.catch(() => {});
+    }
+    return found.value;
+  }
+  const promise = Promise.resolve().then(() => loader());
+  cache.set(key, { value: promise, expires: now + ttl });
   if (cache.size > 100) cache.delete(cache.keys().next().value);
-  try { return await value; } catch (error) { cache.delete(key); throw error; }
+  try { return await promise; } catch (error) { cache.delete(key); throw error; }
 }
 
 function shuffle(items) {
@@ -508,15 +522,17 @@ const server = http.createServer(async (req, res) => {
       if (continuation.length > 12000) return json(res, 400, { error: 'Use the returned Shorts continuation for more results.' });
       if (!continuation) {
         try {
-          const feed = await shortsFeed();
-          if (feed.videos.length || feed.continuation) return json(res, 200, feed);
+          // Cache the pool for speed, but reshuffle each visit so the All tab
+          // still looks fresh on every load.
+          const feed = await cached('shorts:initial', 2 * 60 * 1000, () => shortsFeed(), { stale: 10 * 60 * 1000 });
+          if (feed.videos.length || feed.continuation) return json(res, 200, { videos: shuffle(feed.videos.slice()), continuation: feed.continuation });
         } catch {
           // Fall through to the stable search fallback below.
         }
         // Keep the page usable if YouTube's Shorts surface is temporarily
         // unavailable. The fallback is a stable search, so do not return a
         // search continuation to the reel-sequence API.
-        const fallback = await cached('shorts:fallback', 60 * 1000, () => search('popular shorts', '', 'shorts'));
+        const fallback = await cached('shorts:fallback', 60 * 1000, () => search('popular shorts', '', 'shorts'), { stale: 10 * 60 * 1000 });
         return json(res, 200, { videos: fallback.videos, continuation: null });
       }
       const result = await cached(JSON.stringify(['shorts-sequence', continuation]), 2 * 60 * 1000, () => shortsFeed(continuation));
@@ -532,11 +548,18 @@ const server = http.createServer(async (req, res) => {
         // Shorts search is deterministic. Build a cached pool from several
         // result pages and reorder each fresh visit, so a topic feed visibly
         // changes without leaving the requested topic.
-        const pool = await cached(JSON.stringify(['shorts-pool', q]), 10 * 60 * 1000, () => shortsPool(q));
+        const pool = await cached(JSON.stringify(['shorts-pool', q]), 10 * 60 * 1000, () => shortsPool(q), { stale: 10 * 60 * 1000 });
         return json(res, 200, { videos: shuffle(pool.videos.slice()), continuation: pool.continuation });
       }
-      const result = await cached(JSON.stringify(['search', mode, q, continuation]), 5 * 60 * 1000, () => search(q, continuation, mode));
+      const result = await cached(JSON.stringify(['search', mode, q, continuation]), 5 * 60 * 1000, () => search(q, continuation, mode), { stale: 10 * 60 * 1000 });
       return json(res, 200, result);
+    }
+    if (url.pathname === '/api/video-lite') {
+      const id = url.searchParams.get('id');
+      if (!validId(id)) return json(res, 400, { error: 'Invalid YouTube video ID.' });
+      const info = await cached(`video-lite:${id}`, 10 * 60 * 1000, () => liteDetails(id), { stale: 30 * 60 * 1000 });
+      if (!info) return json(res, 404, { error: 'This video is unavailable right now.' });
+      return json(res, 200, info);
     }
     if (url.pathname === '/api/video') {
       const id = url.searchParams.get('id');
