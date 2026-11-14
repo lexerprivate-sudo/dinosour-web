@@ -160,7 +160,7 @@ public class MainActivity extends Activity {
         errorView.addView(errorDetail);
 
         TextView hint = new TextView(this);
-        hint.setText("On the same Wi-Fi, start the server with \"Start Dinosour (LAN).cmd\" and use the address shown in its window. Away from home, use your hosted HTTPS address.");
+        hint.setText("At home, start \"Start Dinosour (LAN).cmd\" and use the address shown in its window. Away from home, start \"Start Dinosour (Public).cmd\" and use the Public link it prints. This address is saved and survives app updates.");
         hint.setTextColor(Color.rgb(170, 170, 170));
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -236,17 +236,22 @@ public class MainActivity extends Activity {
 
         EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("http://192.168.1.10:3210");
+        input.setHint("http://192.168.1.10:3210 or https://…");
         input.setText(serverUrl != null ? serverUrl : Config.DEFAULT_SERVER);
         input.setSelectAllOnFocus(true);
         box.addView(input);
 
         TextView hint = new TextView(this);
-        hint.setText("Use your computer's Wi-Fi address (for example http://10.0.0.5:3210) or your hosted HTTPS address. Run Start Dinosour (LAN).cmd on the computer first.");
+        hint.setText("Use your computer's Wi-Fi address (for example http://10.0.0.5:3210) or the Public link from Start Dinosour (Public).cmd. The address is saved on this device and survives app updates.");
         hint.setTextSize(12);
         hint.setTextColor(Color.rgb(110, 110, 110));
-        hint.setPadding(0, dp(8), 0, dp(16));
+        hint.setPadding(0, dp(8), 0, dp(10));
         box.addView(hint);
+
+        Button test = new Button(this);
+        test.setText("Test connection");
+        test.setOnClickListener(v -> testServer(input.getText().toString()));
+        box.addView(test);
 
         TextView version = new TextView(this);
         version.setText("Android shell " + BuildConfig.VERSION_NAME);
@@ -289,6 +294,34 @@ public class MainActivity extends Activity {
             dialog.dismiss();
             if (firstRun) finish();
         });
+    }
+
+    private void testServer(String input) {
+        String value = normalizeServer(input);
+        if (value == null) {
+            toast("Enter an address such as http://192.168.1.10:3210");
+            return;
+        }
+        toast("Checking " + value + "...");
+        final String base = value;
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(base + "/api/ping").openConnection();
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(8000);
+                connection.setRequestProperty("Accept", "application/json");
+                int status = connection.getResponseCode();
+                runOnUiThread(() -> {
+                    if (status == 200) toast("Connected to Dinosour.");
+                    else toast("The server answered HTTP " + status + ". Check the address or access link.");
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> toast("Could not reach " + base + ". Start the server and check the address."));
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }).start();
     }
 
     private void checkForUpdates(String base) {
@@ -440,13 +473,16 @@ public class MainActivity extends Activity {
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
                 String description = error.getDescription() == null ? "" : error.getDescription().toString();
-                showError("Could not connect to " + serverUrl + ".\n" + description + "\n\nMake sure the Dinosour server is running and the phone is on the same Wi-Fi.");
+                showError("Could not connect to " + serverUrl + ".\n" + description + "\n\nMake sure the Dinosour server is running and the address in Settings matches the LAN address or the Public link shown on the computer.");
             }
         }
 
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-            if (request.isForMainFrame() && response.getStatusCode() >= 400) {
+            // 401 is the access-code page and 404 may be an app route. Let the
+            // WebView render those response bodies; only hide the app for a real
+            // server failure.
+            if (request.isForMainFrame() && response.getStatusCode() >= 500) {
                 showError("The server answered with HTTP " + response.getStatusCode() + ".\n" + serverUrl);
             }
         }

@@ -22,6 +22,7 @@ function allowPrefetch() {
 }
 try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')) || {}; } catch {}
 preferences.topics = Array.isArray(preferences.topics) ? [...new Set(preferences.topics.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 80)).filter(Boolean))] : [];
+preferences.recentSearches = Array.isArray(preferences.recentSearches) ? [...new Set(preferences.recentSearches.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 120)).filter(Boolean))].slice(0, 8) : [];
 function savePreferences() {
   try { localStorage.setItem('dinosour.ui.v1', JSON.stringify(preferences)); } catch {}
 }
@@ -91,12 +92,30 @@ async function api(path, signal) {
   if (!response.ok) throw new Error(data.error || 'Could not connect. Please retry.');
   return data;
 }
+function watchProgress(v) {
+  const item = library.history.find(entry => entry.id === v.id);
+  if (!item || !item.duration || item.position < 2) return 0;
+  return Math.min(100, Math.max(0, item.position / item.duration * 100));
+}
 function card(v) {
   remember(v);
   const saved = library.saved.some(item => item.id === v.id);
   const hue = [...(v.channel || '')].reduce((n, char) => n + char.charCodeAt(0), 0) % 360;
   const href = v.type === 'short' ? `#short=${v.id}` : `#watch=${v.id}`;
-  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play ${escape(v.title)} next">Play next</button><button data-queue-add="${v.id}" aria-label="Add ${escape(v.title)} to queue">+ Queue</button></div></div></div></article>`;
+  const percent = watchProgress(v);
+  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play ${escape(v.title)} next">Play next</button><button data-queue-add="${v.id}" aria-label="Add ${escape(v.title)} to queue">+ Queue</button></div></div></div></article>`;
+}
+function continueWatching() {
+  // Older history entries may not have a stored duration yet. Keep them
+  // resumable anyway; the progress bar appears once duration is known.
+  const items = library.history.filter(v => v && v.position > 5 && !v.continueHidden &&
+    (!v.duration || (v.duration > 20 && v.position < v.duration - 10))).slice(0, 10);
+  if (!items.length) return '';
+  return `<section class="continue-section" aria-labelledby="continue-title"><div class="continue-heading"><div><h2 id="continue-title">Continue watching</h2><p>Pick up where you left off</p></div><button data-clear-continue>Clear</button></div><div class="continue-rail">${items.map(v => {
+    remember(v);
+    const percent = v.duration ? Math.min(100, v.position / v.duration * 100) : 0;
+    return `<article class="continue-card"><a class="continue-thumb" href="#watch=${v.id}" aria-label="Resume ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"><span class="duration">${v.duration ? `${duration(v.duration - v.position)} left` : 'In progress'}</span>${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}</a><div class="continue-copy"><h3><a href="#watch=${v.id}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><div class="continue-actions"><a class="resume" href="#watch=${v.id}">Resume</a><button data-restart="${v.id}">Start over</button><button class="continue-remove" data-continue-remove="${v.id}" aria-label="Remove ${escape(v.title)} from Continue watching">×</button></div></div></article>`;
+  }).join('')}</div></section>`;
 }
 function shortCard(v) {
   remember(v);
@@ -159,12 +178,58 @@ async function feed(query, current, controller, mode = 'video') {
   const homeShorts = shorts && !query;
   const term = query || (shorts ? 'popular shorts' : 'beautiful nature science short films');
   main.className = shorts ? 'shorts-page' : home ? 'home-page' : 'search-page';
+  const filters = {
+    duration: query && ['short', 'medium', 'long'].includes(preferences.searchDuration) ? preferences.searchDuration : 'any',
+    sort: query && ['newest', 'views', 'shortest', 'longest'].includes(preferences.searchSort) ? preferences.searchSort : 'relevance',
+  };
+  const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
+  const filterBar = !shorts && query ? `<div class="search-filters" aria-label="Search filters"><label>Duration <select id="filter-duration">${option('any', 'Any length', filters.duration === 'any')}${option('short', 'Under 4 minutes', filters.duration === 'short')}${option('medium', '4–20 minutes', filters.duration === 'medium')}${option('long', 'Over 20 minutes', filters.duration === 'long')}</select></label><label>Sort by <select id="filter-sort">${option('relevance', 'Relevance', filters.sort === 'relevance')}${option('newest', 'Newest', filters.sort === 'newest')}${option('views', 'Most viewed', filters.sort === 'views')}${option('shortest', 'Shortest', filters.sort === 'shortest')}${option('longest', 'Longest', filters.sort === 'longest')}</select></label><span id="result-count"></span></div>` : '';
   const heading = shorts
     ? `<div class="search-heading shorts-heading"><h1>${query ? `Shorts for ${escape(query)}` : 'Shorts'}</h1></div>`
     : home ? '<h1 class="sr-only">Home</h1>' : `<div class="search-heading"><h1>Results for ${escape(query)}</h1><span>Videos</span></div>`;
-  main.innerHTML = `${chips(query || '', shorts ? 'shorts' : 'search')}${heading}<div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
+  main.innerHTML = `${chips(query || '', shorts ? 'shorts' : 'search')}${home ? continueWatching() : ''}${heading}${filterBar}<div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
   let continuation = '', loading = false, ended = false, failed = false, initialized = false, frame;
-  const seen = new Set(), usedCursors = new Set();
+  const seen = new Set(), usedCursors = new Set(), allResults = [];
+  const durationMatches = v => filters.duration === 'any' || !v.duration ||
+    filters.duration === 'short' && v.duration < 240 ||
+    filters.duration === 'medium' && v.duration >= 240 && v.duration <= 1200 ||
+    filters.duration === 'long' && v.duration > 1200;
+  const viewNumber = v => Number(v.views) || (() => {
+    const match = String(v.viewsText || '').replace(/,/g, '').match(/([\d.]+)\s*([KMB])?/i);
+    return match ? Number(match[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[match[2]?.toUpperCase()] || 1) : 0;
+  })();
+  const publishedNumber = v => Number(v.publishedAt) || Date.parse(v.published || '') || 0;
+  const sortResults = list => {
+    if (filters.sort === 'views') return [...list].sort((a, b) => viewNumber(b) - viewNumber(a));
+    if (filters.sort === 'newest') return [...list].sort((a, b) => publishedNumber(b) - publishedNumber(a));
+    if (filters.sort === 'shortest') return [...list].sort((a, b) => (a.duration || Infinity) - (b.duration || Infinity));
+    if (filters.sort === 'longest') return [...list].sort((a, b) => (b.duration || 0) - (a.duration || 0));
+    return list;
+  };
+  const visibleResults = () => sortResults(allResults.filter(durationMatches));
+  const updateResultCount = () => {
+    const count = visibleResults().length;
+    if ($('#result-count')) $('#result-count').textContent = `${count}${ended ? '' : '+'} ${count === 1 ? 'video' : 'videos'}`;
+  };
+  const renderResults = () => {
+    const node = $('#results');
+    if (!node) return;
+    const visible = visibleResults();
+    node.innerHTML = visible.length ? visible.map(card).join('') :
+      ended ? (allResults.length
+        ? empty('No videos match these filters', 'Try a different duration or sort option.')
+        : empty('No videos found', 'Try another search or paste a YouTube video link.')) : '';
+    updateResultCount();
+  };
+  const bindFilters = () => {
+    $('#filter-duration')?.addEventListener('change', event => {
+      filters.duration = event.target.value; preferences.searchDuration = filters.duration; savePreferences(); renderResults(); prepareVisibleMetadata();
+    });
+    $('#filter-sort')?.addEventListener('change', event => {
+      filters.sort = event.target.value; preferences.searchSort = filters.sort; savePreferences(); renderResults(); prepareVisibleMetadata();
+    });
+  };
+  bindFilters();
   const observer = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting)) load();
   }, { rootMargin: '650px 0px' });
@@ -192,16 +257,28 @@ async function feed(query, current, controller, mode = 'video') {
         observer.observe($('#feed-status'));
       }
       const fresh = data.videos.filter(v => { if (seen.has(v.id)) return false; seen.add(v.id); return true; });
-      $('#results').insertAdjacentHTML('beforeend', fresh.map(shorts ? shortCard : card).join(''));
-      if (!shorts) prepareVisibleMetadata();
       if (shorts) {
+        $('#results').insertAdjacentHTML('beforeend', fresh.map(shortCard).join(''));
         for (const v of data.videos) if (!shortsFeed.some(item => item.id === v.id)) shortsFeed.push(v);
         shortsFeedCursor = data.continuation || shortsFeedCursor;
+      } else {
+        allResults.push(...fresh);
+        if (filters.sort === 'relevance') {
+          if ($('#results .empty')) $('#results').innerHTML = '';
+          $('#results').insertAdjacentHTML('beforeend', fresh.filter(durationMatches).map(card).join(''));
+          updateResultCount();
+        } else renderResults();
+        prepareVisibleMetadata();
       }
       if (continuation) usedCursors.add(continuation);
       continuation = data.continuation || '';
       ended = !continuation || usedCursors.has(continuation);
-      if (!$('#results').children.length && ended) $('#results').innerHTML = empty(shorts ? 'No Shorts found' : 'No videos found', shorts ? 'Try another Shorts search or add a topic.' : 'Try another search or paste a YouTube video link.');
+      if (!shorts) {
+        updateResultCount();
+        if (ended && !$('#results').children.length) renderResults();
+      } else if (!$('#results').children.length && ended) {
+        $('#results').innerHTML = empty('No Shorts found', 'Try another Shorts search or add a topic.');
+      }
       $('#feed-status').textContent = ended ? (shorts ? 'You’re all caught up for these Shorts.' : 'You’re all caught up for this search.') : '';
       if (ended) observer.disconnect();
       $('#feed').setAttribute('aria-busy', 'false');
@@ -230,7 +307,7 @@ function collection(field) {
   const titles = { saved: 'Watch later', history: 'Watch history', liked: 'Liked videos' };
   const count = library[field].length;
   main.className = 'collection-page';
-  main.innerHTML = `<div class="collection-heading"><div><h1>${titles[field]}</h1><p>${count} ${count === 1 ? 'video' : 'videos'} · Saved on this device</p></div>${count ? `<button class="clear" id="clear-library">${icon('trash')}Clear ${field === 'history' ? 'history' : 'list'}</button>` : ''}</div>${count ? `<div class="grid">${library[field].map(card).join('')}</div>` : empty(field === 'history' ? 'Keep track of what you watch' : 'Your collection starts here', field === 'history' ? 'Videos you play will appear here, ready to pick up where you left off.' : 'Save or like a video to find it here later.')}`;
+  main.innerHTML = `<div class="collection-heading"><div><h1>${titles[field]}</h1><p>${count} ${count === 1 ? 'video' : 'videos'} · Saved on this device</p></div><div class="collection-actions"><button data-backup>${icon('save')}Backup</button>${count ? `<button class="clear" id="clear-library">${icon('trash')}Clear ${field === 'history' ? 'history' : 'list'}</button>` : ''}</div></div>${count ? `<div class="grid">${library[field].map(card).join('')}</div>` : empty(field === 'history' ? 'Keep track of what you watch' : 'Your collection starts here', field === 'history' ? 'Videos you play will appear here, ready to pick up where you left off.' : 'Save or like a video to find it here later.')}`;
   if ($('#clear-library')) $('#clear-library').onclick = () => { library[field] = []; persist(); collection(field); };
   prepareVisibleMetadata();
 }
@@ -361,6 +438,164 @@ document.addEventListener('click', event => {
   persist(); renderQueue();
 });
 
+async function loadShareDialog() {
+  const summary = $('#share-summary');
+  const link = $('#share-invite');
+  const publicLink = $('#share-public');
+  const code = $('#share-code');
+  const lan = $('#share-lan');
+  if (!summary) return;
+  summary.textContent = 'Checking connection…';
+  try {
+    const data = await api('/api/network');
+    const publicUrl = data.publicUrl;
+    const invite = data.inviteUrl || '';
+    link.value = invite;
+    publicLink.value = publicUrl || '';
+    publicLink.placeholder = publicUrl ? '' : 'Public link is offline';
+    code.value = data.accessCode ? `${data.accessCode.slice(0, 5)}-${data.accessCode.slice(5)}` : 'No code needed';
+    code.dataset.raw = data.accessCode || '';
+    lan.innerHTML = data.lan.length ? data.lan.map(url => `<code>${escape(url)}</code>`).join('<br>') : 'No Wi-Fi address detected.';
+    summary.className = `share-summary ${publicUrl ? 'online' : 'offline'}`;
+    summary.innerHTML = publicUrl
+      ? `<strong>Public access is on.</strong> ${data.publicStable ? 'The address is stable while the server runs.' : 'This quick address can change after a restart; use the stable option for a permanent address.'}`
+      : '<strong>Public access is off.</strong> On the computer, run <code>Start Dinosour (Public).cmd</code> or <code>npm run share</code>. Then press Refresh.';
+    $('#share-open').hidden = !publicUrl;
+    $('#share-open').href = publicUrl || '#';
+    $('#share-copy-invite').disabled = !invite;
+    $('#share-copy-code').disabled = !data.accessCode;
+    $('#share-code').closest('.share-row').hidden = !data.accessCode;
+  } catch (error) {
+    summary.className = 'share-summary offline';
+    summary.textContent = error.message;
+  }
+}
+function openShareDialog() {
+  let dialog = $('#share-dialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'share-dialog'; dialog.className = 'share-dialog';
+    dialog.innerHTML = `<div class="dialog-heading"><h2>Share Dinosour</h2><button type="button" data-close-share aria-label="Close">×</button></div><p class="share-intro">Your friend can use this server from another country. Keep the computer and server running while they watch.</p><div id="share-summary" class="share-summary" role="status"></div><div class="share-row"><label for="share-invite">Invite link</label><div class="share-input"><input id="share-invite" readonly><button id="share-copy-invite" type="button">Copy</button></div></div><div class="share-row"><label for="share-public">Public address</label><div class="share-input"><input id="share-public" readonly><a id="share-open" class="share-open" target="_blank" rel="noopener" hidden>Open</a></div></div><div class="share-row"><label for="share-code">Access code</label><div class="share-input"><input id="share-code" readonly><button id="share-copy-code" type="button">Copy</button></div></div><div class="share-row"><label>Same Wi-Fi</label><div id="share-lan" class="share-lan"></div></div><div class="share-buttons"><button type="button" data-refresh-share>Refresh</button><button type="button" data-close-share>Done</button></div><p class="share-help">The access code protects your computer from strangers. Share the invite link only with people you trust. For a permanent address, use <code>Start Dinosour (Stable Public).cmd</code> with Tailscale Funnel.</p>`;
+    document.body.append(dialog);
+    dialog.querySelectorAll('[data-close-share]').forEach(button => button.onclick = () => dialog.close());
+    dialog.querySelector('[data-refresh-share]').onclick = loadShareDialog;
+    dialog.querySelector('#share-copy-invite').onclick = async () => {
+      try { await navigator.clipboard.writeText($('#share-invite').value); toast('Invite link copied'); }
+      catch { $('#share-invite').select(); toast('Select and copy the invite link.'); }
+    };
+    dialog.querySelector('#share-copy-code').onclick = async () => {
+      try { await navigator.clipboard.writeText($('#share-code').dataset.raw || $('#share-code').value); toast('Access code copied'); }
+      catch { $('#share-code').select(); toast('Select and copy the access code.'); }
+    };
+  }
+  dialog.showModal();
+  loadShareDialog();
+}
+$('#share-app').onclick = openShareDialog;
+
+const backupPreferenceKeys = ['theme', 'collapsed', 'volume', 'muted', 'qualityHeight', 'autoplay', 'audioLanguage', 'captions', 'topics', 'searchSort', 'searchDuration', 'recentSearches'];
+function backupPayload() {
+  const chosen = {};
+  for (const field of backupPreferenceKeys) if (preferences[field] !== undefined) chosen[field] = preferences[field];
+  return { app: 'dinosour', version: 1, exportedAt: new Date().toISOString(), library, preferences: chosen };
+}
+function cleanLibraryItem(item, limit = 500) {
+  if (!item || !/^[\w-]{11}$/.test(item.id || '')) return null;
+  const clean = { ...compact(item), id: item.id };
+  for (const field of ['position', 'duration', 'watchedAt']) if (Number.isFinite(Number(item[field]))) clean[field] = Number(item[field]);
+  if (item.continueHidden) clean.continueHidden = true;
+  if (item.type === 'short') clean.type = 'short';
+  return clean;
+}
+function sanitizeBackup(data) {
+  if (!data || data.app !== 'dinosour' || !data.library) throw new Error('This is not a Dinosour backup file.');
+  const clean = {};
+  for (const field of ['saved', 'history', 'liked', 'queue']) {
+    const list = Array.isArray(data.library[field]) ? data.library[field] : [];
+    const seen = new Set();
+    clean[field] = list.map(item => cleanLibraryItem(item, field === 'saved' ? 500 : 200)).filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, field === 'saved' ? 500 : 200);
+  }
+  const input = data.preferences && typeof data.preferences === 'object' ? data.preferences : {};
+  const prefs = {};
+  for (const field of backupPreferenceKeys) if (input[field] !== undefined) prefs[field] = input[field];
+  prefs.topics = Array.isArray(input.topics) ? [...new Set(input.topics.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 80)).filter(Boolean))].slice(0, 100) : [];
+  prefs.recentSearches = Array.isArray(input.recentSearches) ? [...new Set(input.recentSearches.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 120)).filter(Boolean))].slice(0, 8) : [];
+  return { library: clean, preferences: prefs };
+}
+function mergeLibrary(current, incoming) {
+  const merged = {};
+  for (const field of ['saved', 'liked', 'queue']) {
+    const seen = new Set();
+    merged[field] = [...incoming[field], ...current[field]].filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, field === 'queue' ? 100 : 500);
+  }
+  const history = new Map();
+  for (const item of [...current.history, ...incoming.history]) {
+    const previous = history.get(item.id);
+    if (!previous || (item.watchedAt || 0) > (previous.watchedAt || 0)) history.set(item.id, item);
+  }
+  merged.history = [...history.values()].sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0)).slice(0, 200);
+  return merged;
+}
+function applyBackup(data, replace) {
+  const clean = sanitizeBackup(data);
+  library = replace ? clean.library : mergeLibrary(library, clean.library);
+  preferences = replace ? { ...preferences, ...clean.preferences } : {
+    ...preferences,
+    ...clean.preferences,
+    topics: [...new Set([...(preferences.topics || []), ...(clean.preferences.topics || [])])],
+    recentSearches: [...new Set([...(clean.preferences.recentSearches || []), ...(preferences.recentSearches || [])])].slice(0, 8),
+  };
+  preferences.topics = [...new Set((preferences.topics || []).filter(t => typeof t === 'string'))];
+  preferences.recentSearches = (preferences.recentSearches || []).slice(0, 8);
+  persist(); savePreferences(); setTheme(preferences.theme === 'light' ? 'light' : 'dark'); renderTopicNavigation();
+  $('#saved-count').textContent = library.saved.length;
+  const hash = location.hash.slice(1) || 'home';
+  if (['saved', 'history', 'liked'].includes(hash)) collection(hash);
+  else if (hash === 'home') route();
+  toast(replace ? 'Backup restored' : 'Backup merged');
+}
+function openBackupDialog() {
+  let dialog = $('#backup-dialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'backup-dialog'; dialog.className = 'backup-dialog';
+    dialog.innerHTML = `<div class="dialog-heading"><h2>Backup &amp; restore</h2><button type="button" data-close-backup aria-label="Close">×</button></div><p class="backup-intro">Save your topics, Watch later, history, liked videos, queue and playback settings as one file. Restore it here or on another device.</p><div class="backup-actions"><button class="primary" type="button" data-export-backup>Download backup</button><button type="button" data-import-backup>Restore from file</button><input id="backup-file" type="file" accept="application/json,.json" hidden></div><div id="backup-summary" class="backup-summary" role="status"></div>`;
+    document.body.append(dialog);
+    dialog.querySelector('[data-close-backup]').onclick = () => dialog.close();
+    dialog.querySelector('[data-export-backup]').onclick = () => {
+      const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `dinosour-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      dialog.querySelector('#backup-summary').textContent = `Backup downloaded: ${library.saved.length} saved, ${library.history.length} history items.`;
+    };
+    const file = dialog.querySelector('#backup-file');
+    dialog.querySelector('[data-import-backup]').onclick = () => file.click();
+    file.onchange = async () => {
+      const selected = file.files?.[0];
+      if (!selected) return;
+      const summary = dialog.querySelector('#backup-summary');
+      try {
+        const data = JSON.parse(await selected.text());
+        const clean = sanitizeBackup(data);
+        window.__pendingBackup = data;
+        summary.innerHTML = `<p><strong>${escape(selected.name)}</strong> contains ${clean.library.saved.length} saved, ${clean.library.history.length} history, ${clean.library.liked.length} liked and ${clean.library.queue.length} queued videos.</p><div class="backup-choice"><button type="button" data-backup-merge>Merge with this device</button><button type="button" class="primary" data-backup-replace>Replace everything</button></div>`;
+        summary.querySelector('[data-backup-merge]').onclick = () => applyBackup(data, false);
+        summary.querySelector('[data-backup-replace]').onclick = () => applyBackup(data, true);
+      } catch (error) {
+        summary.innerHTML = `<p class="error-text">${escape(error.message)}</p>`;
+      } finally { file.value = ''; }
+    };
+  }
+  dialog.querySelector('#backup-summary').textContent = '';
+  dialog.showModal();
+}
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-backup]')) openBackupDialog();
+});
+
 // Keep the actual player mounted while browsing, so both its buffer and audio
 // survive navigation. Native PiP is optional; the in-app mini-player works in WebView.
 function enableMiniPlayer(id) {
@@ -393,6 +628,7 @@ function movePlayer(layout, target) {
 }
 
 async function watch(id, current, controller, refresh) {
+  const watchStarted = performance.now();
   playbackBusy = true; playbackBufferAhead = 0;
   clearTimeout(warmIntentTimer);
   const warmed = !refresh && warmWatch?.id === id ? warmWatch : null;
@@ -419,6 +655,7 @@ async function watch(id, current, controller, refresh) {
   video.parentElement.append(bufferHint);
   let waitingTimer, stallTimer, hasFrame = false, switching = false, playingIntent = true, audioBuffering = false, ignorePause = false;
   let reloadStreams, captionRequest = 0, captionBlob = null;
+  let metadataMs = 0, firstFrameMs = 0, rebuffers = 0, recoveries = 0, qualityLoads = 0, statsTimer = null;
   const frozenFrame = document.createElement('canvas');
   frozenFrame.className = 'quality-frame'; frozenFrame.hidden = true;
   video.parentElement.append(frozenFrame);
@@ -443,11 +680,12 @@ async function watch(id, current, controller, refresh) {
   let disposed = false, syncTimer, lastSave = 0, separate = false, info, audioFallbacks = [], audioIndex = 0, healthySince = 0, retrying = false;
   const saveProgress = () => {
     if (!info || video.currentTime < 1) return;
-    library.history = [{ ...compact(info), position: video.ended ? 0 : video.currentTime, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
+    library.history = [{ ...compact(info), position: video.ended ? 0 : video.currentTime, duration: video.duration || info.duration || 0, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
     persist();
   };
   cleanup = () => {
     saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer); clearTimeout(stallTimer);
+    clearInterval(statsTimer); $('#stats-dialog')?.remove();
     playbackBusy = false; playbackBufferAhead = Infinity;
     captionRequest++; if (captionBlob) URL.revokeObjectURL(captionBlob);
     warmed?.controller.abort();
@@ -465,11 +703,11 @@ async function watch(id, current, controller, refresh) {
   const retryPlayback = async message => {
     if (disposed || retrying) return;
     if ((autoRetryCount.get(id) || 0) >= 2) return showError(`${message} Retry to request a fresh stream.`);
-    retrying = true;
+    retrying = true; recoveries++;
     autoRetryCount.set(id, (autoRetryCount.get(id) || 0) + 1);
     const position = video.currentTime;
     if (info && position >= 1) {
-      library.history = [{ ...compact(info), position, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
+      library.history = [{ ...compact(info), position, duration: video.duration || info.duration || 0, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
       persist();
     }
     freezeFrame(); playbackBusy = true; discardWarmWatch();
@@ -490,17 +728,20 @@ async function watch(id, current, controller, refresh) {
     info = warmed
       ? await warmed.promise.catch(() => api(`/api/video?id=${id}`, controller.signal))
       : await shortInfo(id, controller.signal, refresh);
+    metadataMs = performance.now() - watchStarted;
     if (current !== generation) return;
     remember(info);
     video.poster = info.thumb || video.poster;
     document.title = `${info.title} — Dinosour`;
-    const savedPosition = library.history.find(v => v.id === id)?.position || 0;
+    const restartKey = `dinosour.restart.${id}`;
+    const savedPosition = sessionStorage.getItem(restartKey) ? 0 : (library.history.find(v => v.id === id)?.position || 0);
+    sessionStorage.removeItem(restartKey);
     $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
     bindInfoActions(id);
     library.queue = library.queue.filter(v => v.id !== id); persist();
     $('.watch-related').insertAdjacentHTML('afterbegin', '<section id="watch-queue"></section>');
     renderQueue();
-    $('.player-tools').insertAdjacentHTML('beforeend', '<label>Audio <select id="audio-language" aria-label="Audio language"></select></label><label>Captions <select id="captions" aria-label="Captions"></select></label><button id="pip-toggle" type="button">Picture-in-picture</button><button id="mini-toggle" type="button">Mini-player</button>');
+    $('.player-tools').insertAdjacentHTML('beforeend', '<label>Audio <select id="audio-language" aria-label="Audio language"></select></label><label>Captions <select id="captions" aria-label="Captions"></select></label><button id="pip-toggle" type="button">Picture-in-picture</button><button id="mini-toggle" type="button">Mini-player</button><button id="fullscreen-toggle" type="button">Fullscreen</button><button id="stats-toggle" type="button">Stats for nerds</button>');
     $('#quality').insertAdjacentHTML('afterbegin', '<option value="auto">Auto</option>');
     let selectedQuality = startQuality(info), lastQualityChange = Date.now(), audioTrack = preferredAudio(info);
     let autoMode = !preferences.qualityHeight;
@@ -550,6 +791,77 @@ async function watch(id, current, controller, refresh) {
         } else { enableMiniPlayer(id); location.hash = '#home'; }
       } catch { enableMiniPlayer(id); location.hash = '#home'; toast('Using the in-app mini-player on this device.'); }
     };
+    const playerShell = video.parentElement;
+    $('#fullscreen-toggle').onclick = async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else if (playerShell.requestFullscreen) await playerShell.requestFullscreen();
+        else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        else toast('Fullscreen is not available in this browser.');
+      } catch { toast('Fullscreen was blocked. Use your browser’s fullscreen control.'); }
+    };
+    const gestureHint = document.createElement('div');
+    gestureHint.className = 'gesture-hint'; gestureHint.hidden = true; gestureHint.setAttribute('aria-hidden', 'true');
+    playerShell.append(gestureHint);
+    let lastTap = 0, lastTapX = 0, lastGestureAt = 0, gestureTimer;
+    const seekByGesture = (direction) => {
+      const target = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + direction * 10));
+      video.currentTime = target;
+      gestureHint.textContent = direction < 0 ? '−10 seconds' : '+10 seconds';
+      gestureHint.className = `gesture-hint ${direction < 0 ? 'seek-back' : 'seek-forward'}`;
+      gestureHint.hidden = false;
+      clearTimeout(gestureTimer); gestureTimer = setTimeout(() => { gestureHint.hidden = true; }, 650);
+      lastGestureAt = Date.now();
+    };
+    playerShell.addEventListener('pointerdown', event => {
+      if (event.pointerType === 'mouse' || event.target.closest('button, input, select, a, .player-tools')) return;
+      const now = Date.now();
+      if (now - lastTap < 340 && Math.abs(event.clientX - lastTapX) < 70) {
+        event.preventDefault(); event.stopPropagation();
+        seekByGesture(event.clientX < playerShell.getBoundingClientRect().left + playerShell.clientWidth / 2 ? -1 : 1);
+        lastTap = 0;
+      } else { lastTap = now; lastTapX = event.clientX; }
+    }, { passive: false });
+    playerShell.addEventListener('dblclick', event => {
+      if (Date.now() - lastGestureAt < 500 || event.target.closest('button, input, select, a')) return;
+      event.preventDefault();
+      seekByGesture(event.clientX < playerShell.getBoundingClientRect().left + playerShell.clientWidth / 2 ? -1 : 1);
+    });
+    const statsDialog = document.createElement('dialog');
+    statsDialog.id = 'stats-dialog'; statsDialog.className = 'stats-dialog';
+    statsDialog.innerHTML = '<div class="dialog-heading"><h2>Playback diagnostics</h2><button type="button" data-close-stats aria-label="Close">×</button></div><pre id="stats-body"></pre><p class="stats-note">Use this when a video is slow or stalls. It shows where time is going.</p>';
+    document.body.append(statsDialog);
+    statsDialog.querySelector('[data-close-stats]').onclick = () => statsDialog.close();
+    const updateStats = () => {
+      if (!statsDialog.open || !info) return;
+      const quality = video.getVideoPlaybackQuality?.();
+      const connection = navigator.connection;
+      const audioLabel = audioTrack?.label || 'Default audio';
+      const captionLabel = $('#captions')?.selectedOptions?.[0]?.textContent || 'Off';
+      const format = value => Number.isFinite(value) ? value.toFixed(1) : '—';
+      const lines = [
+        `Video       ${info.title}`,
+        `Stream      ${info.qualities[selectedQuality].label}${autoMode ? ' (auto)' : ' (manual)'} · ${video.videoWidth || '?'}×${video.videoHeight || '?'}`,
+        `Position    ${format(video.currentTime)}s / ${format(video.duration)}s`,
+        `Buffer       ${format(playbackBufferAhead)}s ahead`,
+        `Startup     stream details ${format(metadataMs / 1000)}s · first frame ${format(firstFrameMs / 1000)}s`,
+        `Playback    ${rebuffers} rebuffer${rebuffers === 1 ? '' : 's'} · ${recoveries} recover${recoveries === 1 ? 'y' : 'ies'} · ${Math.max(0, qualityLoads - 1)} quality change${qualityLoads - 1 === 1 ? '' : 's'}`,
+        `Frames      ${quality ? `${quality.droppedVideoFrames} dropped / ${quality.totalVideoFrames} total` : 'not reported'}`,
+        `Audio       ${audioLabel}${separate ? ' (separate AAC)' : ' (muxed)'}`,
+        `Captions    ${captionLabel}`,
+        `Speed       ${format(video.playbackRate)}× · volume ${Math.round(video.volume * 100)}%${video.muted ? ' (muted)' : ''}`,
+        `Network     ${connection?.effectiveType || 'unknown'}${connection?.downlink ? ` · ~${connection.downlink} Mbps` : ''}${connection?.saveData ? ' · data saver' : ''}`,
+        `Server      ${location.host} · ${navigator.onLine ? 'online' : 'offline'}`,
+        `Player      ${document.pictureInPictureElement ? 'picture-in-picture' : 'in page'}`,
+      ];
+      $('#stats-body').textContent = lines.join('\n');
+      window.__dinosourStats = { metadataMs, firstFrameMs, rebuffers, recoveries, qualityLoads, buffer: playbackBufferAhead };
+    };
+    $('#stats-toggle').onclick = () => {
+      statsDialog.showModal(); updateStats();
+      clearInterval(statsTimer); statsTimer = setInterval(updateStats, 1000);
+    };
+    statsDialog.addEventListener('close', () => clearInterval(statsTimer));
     const syncAudio = () => {
       if (!separate || disposed) return;
       if (Math.abs(audio.currentTime - video.currentTime) > .35 && audio.readyState) audio.currentTime = video.currentTime;
@@ -628,6 +940,7 @@ async function watch(id, current, controller, refresh) {
     const loadQuality = (index, position = 0, autoplay = false) => {
       const selected = info.qualities[index];
       const rate = Number($('#speed')?.value) || 1;
+      qualityLoads++;
       freezeFrame(); switching = true; playingIntent = autoplay;
       audioBuffering = false; clearTimeout(stallTimer);
       selectedQuality = index; lastQualityChange = Date.now(); updateAutoLabel();
@@ -671,6 +984,7 @@ async function watch(id, current, controller, refresh) {
     video.onplay = () => { playingIntent = true; if (video.readyState >= 3) playAudio(); };
     video.onplaying = () => {
       switching = false; playbackBusy = false; clearTimeout(stallTimer);
+      if (!firstFrameMs) firstFrameMs = performance.now() - watchStarted;
       bufferHint.textContent = 'Buffering…'; hideLoading(); clearStatus(); playAudio(); healthySince = Date.now();
     };
     audio.onplaying = () => { $('#unmute')?.remove(); };
@@ -695,7 +1009,7 @@ async function watch(id, current, controller, refresh) {
       clearTimeout(waitingTimer); if (!retrying) bufferHint.hidden = true;
     };
     video.onwaiting = () => {
-      audio.pause(); healthySince = 0; playbackBusy = true; discardWarmWatch(); showBuffering();
+      audio.pause(); healthySince = 0; playbackBusy = true; rebuffers++; discardWarmWatch(); showBuffering();
       clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         if (disposed || !playingIntent || video.readyState >= 3) return;
@@ -877,7 +1191,7 @@ async function reel(id, current, controller) {
   const saveProgress = (position = video.currentTime) => {
     const item = videos.get(entry().id) || entry();
     if (!(position >= 1)) return;
-    library.history = [{ ...compact(item), type: 'short', position, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== item.id)].slice(0, 200);
+    library.history = [{ ...compact(item), type: 'short', position, duration: video.duration || item.duration || 0, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== item.id)].slice(0, 200);
     persist();
   };
   cleanup = () => {
@@ -1222,6 +1536,7 @@ async function reel(id, current, controller) {
 
 let routeController;
 async function route(refresh = false) {
+  closeSuggestions();
   const destination = location.hash.slice(1) || 'home';
   if (miniSession) {
     if (destination === `watch=${miniSession.id}` && refresh !== true && miniSession.detached) {
@@ -1279,9 +1594,71 @@ function getVideoId(text) {
     return /^[\w-]{11}$/.test(id || '') ? id : null;
   } catch { return null; }
 }
+const suggestionBox = $('#search-suggestions');
+let suggestTimer, suggestController, suggestionItems = [], suggestionIndex = -1;
+function closeSuggestions() {
+  if (!suggestionBox) return;
+  suggestionBox.hidden = true; suggestionBox.innerHTML = ''; suggestionItems = []; suggestionIndex = -1;
+  $('#search').setAttribute('aria-expanded', 'false');
+}
+function renderSuggestions(items, recent = false) {
+  suggestionItems = items; suggestionIndex = -1;
+  if (!items.length) return closeSuggestions();
+  suggestionBox.innerHTML = items.map((value, index) => `<button type="button" class="search-suggestion" role="option" data-suggestion="${escape(value)}" data-index="${index}">${icon(recent ? 'history' : 'search')}<span class="suggest-label">${escape(value)}</span><span class="suggest-kind">${recent ? 'Recent' : ''}</span></button>`).join('') +
+    (recent ? '<button type="button" class="suggest-clear" data-clear-recent>Clear recent searches</button>' : '');
+  suggestionBox.hidden = false;
+  $('#search').setAttribute('aria-expanded', 'true');
+}
+function loadSuggestions() {
+  const value = $('#search').value.trim();
+  clearTimeout(suggestTimer); suggestController?.abort();
+  if (!value) { renderSuggestions(preferences.recentSearches, true); return; }
+  suggestController = new AbortController();
+  suggestTimer = setTimeout(async () => {
+    try {
+      const data = await api(`/api/suggest?q=${encodeURIComponent(value)}`, suggestController.signal);
+      if ($('#search').value.trim() === value && document.activeElement === $('#search')) renderSuggestions(data.suggestions || []);
+    } catch (error) { if (error.name !== 'AbortError') closeSuggestions(); }
+  }, 180);
+}
+function chooseSuggestion(value) {
+  $('#search').value = value; updateSearch(); closeSuggestions();
+  $('#search-form').requestSubmit();
+}
+$('#search').addEventListener('focus', loadSuggestions);
+$('#search').addEventListener('input', loadSuggestions);
+$('#search').addEventListener('keydown', event => {
+  if (suggestionBox.hidden) return;
+  const buttons = [...suggestionBox.querySelectorAll('[data-suggestion]')];
+  if (!buttons.length) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    suggestionIndex = (suggestionIndex + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons.forEach((button, index) => { button.classList.toggle('active', index === suggestionIndex); button.setAttribute('aria-selected', String(index === suggestionIndex)); });
+    buttons[suggestionIndex].scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Enter' && suggestionIndex >= 0) {
+    event.preventDefault(); chooseSuggestion(buttons[suggestionIndex].dataset.suggestion);
+  } else if (event.key === 'Escape') { closeSuggestions(); $('#search').blur(); }
+});
+suggestionBox.addEventListener('pointerdown', event => event.preventDefault());
+suggestionBox.addEventListener('click', event => {
+  if (event.target.closest('[data-clear-recent]')) {
+    preferences.recentSearches = []; savePreferences(); closeSuggestions(); return;
+  }
+  const item = event.target.closest('[data-suggestion]');
+  if (item) chooseSuggestion(item.dataset.suggestion);
+});
+document.addEventListener('pointerdown', event => {
+  if (!event.target.closest('.search-wrap')) closeSuggestions();
+});
 $('#search-form').onsubmit = event => {
   event.preventDefault(); const q = $('#search').value.trim(); if (!q) return;
+  closeSuggestions();
   const id = getVideoId(q);
+  if (!id) {
+    preferences.recentSearches = [q, ...preferences.recentSearches.filter(value => value.toLowerCase() !== q.toLowerCase())].slice(0, 8);
+    savePreferences();
+  }
   const next = id
     ? (/\/shorts\//.test(q) ? `#short=${id}` : `#watch=${id}`)
     : inShortsContext() ? `#shorts=${encodeURIComponent(q)}` : `#search=${encodeURIComponent(q)}`;
@@ -1300,6 +1677,26 @@ document.addEventListener('click', event => {
     else if ($('.chips')) { const state = chipsState(); $('.chips').outerHTML = chips(state.selected, state.scope); }
     toast('Topic removed');
   }
+  const restart = event.target.closest('[data-restart]');
+  if (restart) {
+    event.preventDefault();
+    const id = restart.dataset.restart;
+    sessionStorage.setItem(`dinosour.restart.${id}`, '1');
+    const href = `#watch=${id}`;
+    if (location.hash === href) route(true); else location.hash = href;
+  }
+  const removeContinue = event.target.closest('[data-continue-remove]');
+  if (removeContinue) {
+    const item = library.history.find(v => v.id === removeContinue.dataset.continueRemove);
+    if (item) { item.continueHidden = true; persist(); }
+    removeContinue.closest('.continue-card')?.remove();
+    if (!$('.continue-card')) $('.continue-section')?.remove();
+  }
+  if (event.target.closest('[data-clear-continue]')) {
+    for (const item of library.history) item.continueHidden = true;
+    persist(); $('.continue-section')?.remove();
+    toast('Continue watching cleared');
+  }
   const save = event.target.closest('[data-save]');
   if (save) {
     event.preventDefault();
@@ -1315,6 +1712,12 @@ document.addEventListener('click', event => {
     if (id) autoRetryCount.delete(id);
     route(true);
   }
+});
+document.addEventListener('fullscreenchange', () => {
+  const button = $('#fullscreen-toggle');
+  if (!button) return;
+  button.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+  button.setAttribute('aria-label', document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen');
 });
 document.addEventListener('keydown', event => {
   if ($('#topic-dialog').open) return;

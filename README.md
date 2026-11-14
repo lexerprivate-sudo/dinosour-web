@@ -47,6 +47,62 @@ $env:PUBLIC_ORIGIN = 'https://dinosour.example.com'
 npm run serve
 ```
 
+## Share with a friend in another country
+
+Double-click **Start Dinosour (Public).cmd**, or run:
+
+```powershell
+cd C:\Users\Rave\Desktop\dinosour
+npm run share
+```
+
+The first run downloads the standalone Cloudflare tunnel client (about 55 MB,
+saved under the gitignored `tools/` folder). It then starts the server if it is
+not already running, creates a 10-character access code, and prints:
+
+- **Public link** - the temporary HTTPS address of this computer.
+- **Access code** - required by public visitors.
+- **Invite link** - the link to send to your friend. Opening it once unlocks
+  the app and stores a cookie for a year.
+
+Keep the sharing window open while your friend uses the app. The quick-tunnel
+address changes if that window or the tunnel restarts. Press Ctrl+C to stop
+public access; local and same-Wi-Fi access keep working normally.
+
+The in-app **Share** button (top bar) shows the current public address, invite
+link, access code, and same-Wi-Fi addresses. It reads `/api/network`, so it stays
+correct when the tunnel address changes.
+
+### Make the address permanent
+
+The quick tunnel is free and needs no account, but its address is temporary.
+Both stable options are optional and need a one-time login of your own:
+
+- **Tailscale Funnel (simplest):** install Tailscale, run `tailscale up` and sign
+  in, enable Funnel for this computer in the Tailscale admin console, then run
+  **Start Dinosour (Stable Public).cmd** or `npm run share:stable`. The printed
+  `https://<computer>.<tailnet>.ts.net` address stays the same.
+- **Named Cloudflare tunnel:** create a tunnel and hostname in the Cloudflare
+  dashboard, save the tunnel token in `data/cloudflared-token.txt` and the public
+  origin (for example `https://dinosour.example.com`) in
+  `data/public-origin.txt`, then run `npm run share`. The address stays the same
+  while the tunnel runs.
+
+`PUBLIC_ORIGIN` can also be set as an environment variable for a reverse-proxy
+deployment. `MEDIA_ORIGIN` is optional; without it, playback traffic uses the
+same public origin as the app, which works through one tunnel or proxy.
+
+### Access and safety
+
+Loopback and private-LAN requests stay open. Requests arriving through a tunnel
+or reverse proxy must present the access code; API and media requests are
+protected too. The code and public address live in the gitignored `data/`
+folder (`access.json`, `public-url.json`). Share the invite link only with people
+you trust: while they use it, they are using this computer's YouTube connection.
+To replace a leaked code, run `npm run share:rotate` while sharing. A new code
+is written immediately and the current public address stays usable; send the new
+invite link (refresh the in-app Share screen to show it).
+
 ## Features
 
 - Real YouTube search and automatic infinite scrolling, with no app-imposed page limit.
@@ -81,6 +137,24 @@ npm run serve
   watch page, plus an explicit volume slider and mute button in the Playback row.
   The slider controls the separate audio track too and is remembered on your device.
 - Watch later, liked videos, and watch history with resume positions.
+- **Continue watching** on Home: unfinished videos appear in a horizontal rail
+  with a progress bar, **Resume**, **Start over**, per-item **x**, and **Clear**.
+  Progress bars also appear on matching video cards.
+- **Search upgrades:** suggestions from YouTube as you type, recent searches,
+  duration filters (under 4 minutes, 4-20 minutes, over 20 minutes), and sorting
+  by relevance, newest, most viewed, shortest, or longest. Filters and recent
+  searches are remembered on the device.
+- **Playback diagnostics:** **Stats for nerds** shows startup timing, quality,
+  buffer-ahead, rebuffer/recovery counts, dropped frames, audio/caption source,
+  network estimate, and player state, updating once a second.
+- **Mobile gestures:** double-tap the left or right half of a video to seek
+  back 10 or ahead 10 seconds, with a brief on-screen confirmation. A dedicated
+  Fullscreen button sits beside the other player controls.
+- **Backup and restore:** open **Backup** in the sidebar or a library page to
+  download a JSON backup. Restore can merge with this device or replace its
+  saved videos, history, liked videos, queue, topics, and playback settings.
+- **Share screen:** shows the current public link, invite link, access code,
+  and same-Wi-Fi addresses, with copy buttons and a refresh action.
 - Responsive desktop and mobile layouts, including safe-area padding for notches
   and gesture bars.
 - Installable PWA: a web app manifest, maskable icons, and a network-first
@@ -201,10 +275,13 @@ A signed Android shell is included:
 - Download the latest APK:
   <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
 - Local copies: `C:\Users\Rave\Desktop\DinosourWeb.apk` and
-  `C:\Users\Rave\Desktop\DinosourWeb-1.0.1.apk`
+  `C:\Users\Rave\Desktop\DinosourWeb-1.0.2.apk`
 - Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.0.1`
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.0.2`
+- Settings include **Test connection**, and the server address is saved in
+  SharedPreferences so it survives app updates. The address can be either the
+  same-Wi-Fi LAN URL or the public HTTPS link.
 
 This app installs alongside the original Dinosour from the `tot` project.
 It has its own Android package and GitHub repository.
@@ -231,8 +308,12 @@ is the backend. To use the app away from home, host the Node process on a VPS
    or source.
 3. Connect the phone to the same Wi-Fi, open Dinosour, and accept the prefilled
    server address. If the PC's address changed, tap the **gear icon** in the top
-   bar and enter the address printed by the LAN script.
-4. The library, topics, and history are stored on the phone. The gear icon also
+   bar, enter the address printed by the LAN script, and use **Test connection**.
+4. Away from home, start **Start Dinosour (Public).cmd** instead, enter the
+   printed public address in the gear settings, and tap **Test connection**. If
+   the app shows **Enter access code**, type the code once; the WebView keeps the
+   unlock cookie. The saved address survives app updates.
+5. The library, topics, and history are stored on the phone. The gear icon also
    has **Check for updates**.
 
 The gear icon appears only inside the Android shell; in a normal browser it stays
@@ -275,7 +356,7 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.0.1` release hosts
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.0.2` release hosts
 `DinosourWeb.apk`, and `public/app-update.json` points `apkUrl` at the stable
 `/releases/latest/download/DinosourWeb.apk` URL, which always serves the newest
 release asset with that name.
@@ -367,6 +448,9 @@ npm run test:feed
 npm run test:recovery
 npm run test:shorts
 npm run test:prefetch
+npm run test:watch-prefetch
+npm run test:playback-features
+npm run test:features
 npm run test:browser
 npm run test:pwa
 ```
@@ -393,6 +477,13 @@ uses a fixed three-item reel with real media metadata: it waits for the idle pla
 to buffer the next Short, swipes twice, and verifies that the promoted video/audio
 kept their preloaded sources, both player pairs alternate, playback starts without
 a loading spinner, and the switch stays within a seamless-latency budget.
+`npm run test:features` mocks search, suggestions, thumbnails, and local media to
+verify Continue watching, filters/sorting/recent searches, backup export and
+merge/replace, the share dialog, playback diagnostics, and double-tap seeking.
+`npm test` also starts an isolated server with an access code and checks that
+loopback stays open while forwarded/public requests, APIs, and media require the
+code; it covers invite links, secure cookies, normalization, and open-redirect
+protection.
 
 Independent project, not affiliated with YouTube. Titles, thumbnails, and videos
 belong to their respective creators.

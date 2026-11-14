@@ -5,11 +5,12 @@ import { spawn, execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { search, shortsFeed, shortsPool } from './youtube-search.js';
 import { selectAudioFormats, audioTrackGroups } from './audio-formats.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
+const dataDir = fileURLToPath(new URL('./data/', import.meta.url));
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 3210);
 // Public HTTPS origin when the app runs behind a reverse proxy. When it is set,
@@ -26,6 +27,113 @@ const tickets = new Map();
 const captionTickets = new Map();
 let active = 0;
 const validId = (id) => /^[A-Za-z0-9_-]{11}$/.test(id || '');
+
+function lanAddresses() {
+  const addresses = new Set();
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const address of list || []) {
+      if (address.family === 'IPv4' && !address.internal && !address.address.startsWith('169.254.')) addresses.add(address.address);
+    }
+  }
+  return [...addresses].map(address => `http://${address}:${port}`);
+}
+
+const accessHash = code => createHash('sha256').update(String(code)).digest('hex');
+const secureEqual = (a, b) => {
+  if (!a || !b || a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+};
+let accessCache = { at: 0, code: process.env.ACCESS_CODE?.trim() || '' };
+async function accessCode() {
+  if (process.env.ACCESS_CODE !== undefined) return process.env.ACCESS_CODE.trim();
+  if (Date.now() - accessCache.at < 1500) return accessCache.code;
+  let code = '';
+  try { code = JSON.parse(await readFile(dataDir + 'access.json', 'utf8')).code || ''; } catch { /* Public sharing is off. */ }
+  accessCache = { at: Date.now(), code: String(code).trim() };
+  return accessCache.code;
+}
+let publicCache = { at: 0, value: null };
+async function publicDetails() {
+  if (Date.now() - publicCache.at < 1500) return publicCache.value;
+  let value = publicOrigin ? { url: publicOrigin, provider: 'configured', stable: true } : null;
+  if (!value) {
+    try {
+      const saved = JSON.parse(await readFile(dataDir + 'public-url.json', 'utf8'));
+      if (saved?.url) value = saved;
+    } catch { /* No tunnel is running. */ }
+  }
+  publicCache = { at: Date.now(), value };
+  return value;
+}
+function cookie(req, name) {
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const index = part.indexOf('=');
+    if (index > 0 && part.slice(0, index).trim() === name) return decodeURIComponent(part.slice(index + 1).trim());
+  }
+  return '';
+}
+function setAccessCookie(req, res, code) {
+  const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  res.setHeader('set-cookie', `dinosour_access=${accessHash(code)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`);
+}
+function unlockPage(next = '/', error = '') {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f0f0f"><title>Unlock Dinosour</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f0f0f;color:#f1f1f1;font:15px/1.5 Roboto,Arial,sans-serif;padding:24px;box-sizing:border-box}main{width:min(390px,100%);background:#181818;border:1px solid #303030;border-radius:16px;padding:28px;box-shadow:0 20px 70px #0008}h1{margin:0 0 6px;font-size:24px}p{color:#aaa;margin:0 0 20px}label{display:block;font-size:13px;margin-bottom:7px}input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #3f3f3f;border-radius:8px;background:#0f0f0f;color:#f1f1f1;font:inherit;text-transform:uppercase;letter-spacing:.08em}button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:999px;background:#f1f1f1;color:#0f0f0f;font:inherit;font-weight:700;cursor:pointer}.error{color:#ff8a8a;font-size:13px;margin:0 0 14px}.note{font-size:12px;color:#777;margin:18px 0 0}.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:20px;margin-bottom:22px}.brand img{width:33px;height:24px}</style></head>
+<body><main><div class="brand"><img src="/icon.svg" alt="">Dinosour</div><h1>Enter access code</h1><p>This Dinosour server is shared privately. Use the code from the person who sent you the link.</p>${error ? `<p class="error">${error}</p>` : ''}<form method="get" action="/unlock"><input type="hidden" name="next" value="${next.replace(/"/g, '&quot;')}"><label for="code">Access code</label><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit">Open Dinosour</button></form><p class="note">After unlocking, this device stays signed in.</p></main></body></html>`;
+}
+function wantsHtml(req) {
+  return String(req.headers.accept || '').includes('text/html');
+}
+async function allowRequest(req, res, url, code) {
+  if (!code) return true;
+  const forwarded = req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto'] ||
+    req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['cf-ray'];
+  const remote = String(req.socket.remoteAddress || '');
+  const privateClient = !forwarded && (/^127\./.test(remote) || remote === '::1' || remote === '::ffff:127.0.0.1' ||
+    /^10\./.test(remote) || /^192\.168\./.test(remote) || /^172\.(1[6-9]|2\d|3[01])\./.test(remote) ||
+    /^169\.254\./.test(remote) || /^fe80:/i.test(remote) || /^f[cd][0-9a-f]{2}:/i.test(remote));
+  if (privateClient) return true;
+  if (url.pathname === '/unlock') {
+    const supplied = (url.searchParams.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!supplied) {
+      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(req.method === 'HEAD' ? undefined : unlockPage(url.searchParams.get('next') || '/'));
+      return false;
+    }
+    if (!secureEqual(accessHash(supplied), accessHash(code))) {
+      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(req.method === 'HEAD' ? undefined : unlockPage(url.searchParams.get('next') || '/', 'That access code is not correct.'));
+      return false;
+    }
+    setAccessCookie(req, res, code);
+    const requested = url.searchParams.get('next') || '/';
+    const next = requested.startsWith('/') && !requested.startsWith('//') && !requested.startsWith('/unlock') ? requested : '/';
+    res.writeHead(303, { location: next, 'cache-control': 'no-store' });
+    res.end();
+    return false;
+  }
+  const queryAccess = (url.searchParams.get('access') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (queryAccess && secureEqual(accessHash(queryAccess), accessHash(code))) {
+    setAccessCookie(req, res, code);
+    url.searchParams.delete('access');
+    res.writeHead(303, { location: url.pathname + (url.search || ''), 'cache-control': 'no-store' });
+    res.end();
+    return false;
+  }
+  if (secureEqual(cookie(req, 'dinosour_access'), accessHash(code))) return true;
+  if (url.pathname === '/api/ping' || url.pathname === '/app-update.json' || url.pathname === '/download/DinosourWeb.apk' ||
+      url.pathname === '/icon.svg' || url.pathname === '/icons/favicon-32.png' || url.pathname === '/manifest.webmanifest') return true;
+  if (url.pathname.startsWith('/api/')) {
+    json(res, 401, { error: 'This server needs its access code. Open the invite link again.' });
+  } else if (wantsHtml(req)) {
+    const next = url.pathname + url.search;
+    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(req.method === 'HEAD' ? undefined : unlockPage(next));
+  } else {
+    json(res, 401, { error: 'Access code required.' });
+  }
+  return false;
+}
 
 function extract(args) {
   if (active >= 4) return Promise.reject(new Error('A few videos are loading. Please try again in a moment.'));
@@ -109,6 +217,9 @@ function mediaBaseFor(req) {
   if (publicOrigin) return publicOrigin;
   const origin = requestOrigin(req);
   if (!origin) return mediaBase;
+  // A tunnel or reverse proxy only forwards the app port. Keep media on the
+  // same public origin instead of pointing the browser at an internal port.
+  if (req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']) return origin;
   if (!mediaBase || mediaPort === port) return origin;
   try {
     const url = new URL(origin);
@@ -258,6 +369,39 @@ const server = http.createServer(async (req, res) => {
   if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { error: 'Method not allowed.' });
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
   try {
+    const code = await accessCode();
+    if (!await allowRequest(req, res, url, code)) return;
+    if (url.pathname === '/api/ping') {
+      return json(res, 200, { ok: true, app: 'dinosour', host: os.hostname() });
+    }
+    if (url.pathname === '/api/network') {
+      const publicInfo = await publicDetails();
+      const origin = requestOrigin(req);
+      const base = publicInfo?.url || origin;
+      return json(res, 200, {
+        lan: lanAddresses(),
+        publicUrl: publicInfo?.url || null,
+        publicProvider: publicInfo?.provider || null,
+        publicStable: publicInfo?.stable === true,
+        currentOrigin: origin,
+        accessRequired: !!code,
+        accessCode: code || null,
+        inviteUrl: base ? (code ? `${base}/unlock?code=${encodeURIComponent(code)}&next=/` : `${base}/`) : null,
+      });
+    }
+    if (url.pathname === '/api/suggest') {
+      const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
+      if (!q) return json(res, 200, { suggestions: [] });
+      const suggestions = await cached(`suggest:${q.toLowerCase()}`, 5 * 60 * 1000, async () => {
+        const upstream = await fetch(`https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(q)}`, {
+          signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' },
+        });
+        if (!upstream.ok) throw new Error('Search suggestions are unavailable.');
+        const payload = await upstream.json();
+        return [...new Set((Array.isArray(payload?.[1]) ? payload[1] : []).map(value => String(value).trim()).filter(Boolean))].slice(0, 10);
+      });
+      return json(res, 200, { suggestions });
+    }
     if (url.pathname.startsWith('/api/captions/')) {
       const token = url.pathname.slice('/api/captions/'.length);
       const item = captionTickets.get(token);
@@ -383,12 +527,13 @@ const server = http.createServer(async (req, res) => {
     json(res, 502, { error: 'The video stream was interrupted. Please retry.' });
   }
 });
-const mediaServer = http.createServer((req, res) => {
+const mediaServer = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { error: 'Method not allowed.' });
   const url = new URL(req.url, `http://127.0.0.1:${mediaPort}`);
   if (!url.pathname.startsWith('/api/stream/')) return json(res, 404, { error: 'Not found.' });
+  if (!await allowRequest(req, res, url, await accessCode())) return;
   serveStream(req, res, url);
 });
 mediaServer.on('error', error => {
@@ -399,18 +544,15 @@ mediaServer.listen(mediaPort, host, () => {
   mediaBase = `http://127.0.0.1:${mediaPort}`;
 });
 
-server.listen(port, host, () => {
+server.listen(port, host, async () => {
   const shownHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   console.log(`Dinosour is ready: http://${shownHost}:${port}`);
   if (host === '0.0.0.0' || host === '::') {
-    const addresses = new Set();
-    for (const list of Object.values(os.networkInterfaces())) {
-      for (const address of list || []) {
-        if (address.family === 'IPv4' && !address.internal && !address.address.startsWith('169.254.')) addresses.add(address.address);
-      }
-    }
-    for (const address of addresses) console.log(`On your phone (same Wi-Fi): http://${address}:${port}`);
+    for (const address of lanAddresses()) console.log(`On your phone (same Wi-Fi): ${address}`);
   }
+  const publicInfo = await publicDetails();
+  if (publicInfo?.url) console.log(`Public: ${publicInfo.url}`);
+  if (await accessCode()) console.log('Access code protection is on for non-local requests.');
   if (process.argv.includes('--open')) {
     const url = `http://localhost:${port}`;
     if (process.platform === 'win32') execFile('cmd', ['/c', 'start', '', url]);

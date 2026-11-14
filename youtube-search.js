@@ -1,5 +1,19 @@
 // Public web search only. Playback resolution is handled separately by yt-dlp.
 const text = value => value?.simpleText || value?.runs?.map(run => run.text || '').join('') || '';
+const viewCount = value => {
+  const match = text(value).replace(/,/g, '').match(/([\d.]+)\s*([KMB])?/i);
+  if (!match) return 0;
+  const scale = { K: 1e3, M: 1e6, B: 1e9 }[match[2]?.toUpperCase()] || 1;
+  return Math.round(Number(match[1]) * scale) || 0;
+};
+// Search results publish a relative age ("2 years ago"), not a date. Turn it
+// into an approximate timestamp so the Newest sort still orders loaded results.
+const publishedAt = value => {
+  const match = text(value).toLowerCase().match(/(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/);
+  if (!match) return undefined;
+  const units = { second: 1e3, minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5, month: 2592e6, year: 31536e6 };
+  return Date.now() - Number(match[1]) * units[match[2]];
+};
 const SHORTS_PARAMS = 'EgIQCQ%3D%3D';
 const VIDEO_PARAMS = 'EgIQAQ%3D%3D';
 const CONTEXT = { client: { clientName: 'WEB', clientVersion: '2.20240910.00.00', hl: 'en', gl: 'US' } };
@@ -36,6 +50,7 @@ export async function search(query, continuation, mode = 'video') {
       title: s.overlayMetadata?.primaryText?.content || s.accessibilityText?.split(',')[0] || 'YouTube Short',
       channel: 'YouTube Short',
       duration: 0,
+      views: viewCount(s.overlayMetadata?.secondaryText?.content),
       viewsText: s.overlayMetadata?.secondaryText?.content || '',
       thumb: `/api/thumb/${id}?t=short`,
       type: 'short',
@@ -52,7 +67,9 @@ export async function search(query, continuation, mode = 'video') {
       const length = text(v.lengthText);
       videos.push({ id: v.videoId, title: text(v.title), channel: text(v.ownerText) || text(v.longBylineText),
         duration: length ? length.split(':').reduce((n, part) => n * 60 + Number(part), 0) : 0,
-        viewsText: text(v.viewCountText), thumb: `/api/thumb/${v.videoId}`, type: 'video' });
+        views: viewCount(v.viewCountText), viewsText: text(v.viewCountText),
+        published: text(v.publishedTimeText) || undefined, publishedAt: publishedAt(v.publishedTimeText),
+        thumb: `/api/thumb/${v.videoId}`, type: 'video' });
     }
     if (!next && node.continuationCommand?.token) next = node.continuationCommand.token;
     for (const value of Object.values(node)) {

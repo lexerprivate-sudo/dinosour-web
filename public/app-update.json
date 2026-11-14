@@ -1,6 +1,6 @@
 {
-  "versionCode": 2,
-  "versionName": "1.0.1",
+  "versionCode": 3,
+  "versionName": "1.0.2",
   "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/latest/download/DinosourWeb.apk",
-  "notes": "Dinosour Web 1.0.1 is a separate app from the original Dinosour, with its own package name, icon label and update feed. It can be installed alongside the original app."
+  "notes": "Dinosour Web 1.0.2 adds remote sharing, a saved server address, a connection test, and the latest web improvements: Continue watching, search suggestions and filters, playback diagnostics, mobile seek gestures, library backup/restore, and more reliable public-link handling."
 }

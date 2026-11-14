@@ -1,4 +1,6 @@
 node_modules/
+tools/
+data/
 test-results/
 server.log
 server.err

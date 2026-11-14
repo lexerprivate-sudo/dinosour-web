@@ -59,12 +59,16 @@
     <button class="icon-button" id="menu-toggle" aria-label="Toggle navigation" aria-controls="sidebar" aria-expanded="true" title="Toggle navigation"><svg class="icon"><use href="#i-menu"/></svg></button>
     <a class="brand" href="#home" aria-label="Dinosour home"><img src="/icon.svg" alt="" width="33" height="24"><span>Dinosour</span></a>
   </div>
-  <form id="search-form" role="search">
-    <input id="search" aria-label="Search YouTube or paste a video link" placeholder="Search" autocomplete="off" maxlength="200">
-    <button id="clear-search" type="button" class="icon-button" aria-label="Clear search" hidden><svg class="icon"><use href="#i-close"/></svg></button>
-    <button class="search-submit" aria-label="Search" title="Search" type="submit"><svg class="icon"><use href="#i-search"/></svg></button>
-  </form>
+  <div class="search-wrap">
+    <form id="search-form" role="search">
+      <input id="search" aria-label="Search YouTube or paste a video link" placeholder="Search" autocomplete="off" maxlength="200" aria-autocomplete="list" aria-controls="search-suggestions" aria-expanded="false">
+      <button id="clear-search" type="button" class="icon-button" aria-label="Clear search" hidden><svg class="icon"><use href="#i-close"/></svg></button>
+      <button class="search-submit" aria-label="Search" title="Search" type="submit"><svg class="icon"><use href="#i-search"/></svg></button>
+    </form>
+    <div id="search-suggestions" class="search-suggestions" role="listbox" aria-label="Search suggestions" hidden></div>
+  </div>
   <div class="header-actions">
+    <button class="icon-button" id="share-app" aria-label="Share this server" title="Share this server"><svg class="icon"><use href="#i-share"/></svg></button>
     <button class="icon-button" id="theme-toggle" aria-label="Switch to light theme" title="Switch to light theme"><svg class="icon"><use href="#i-sun"/></svg></button>
     <button class="icon-button" id="android-settings" aria-label="Android app settings" title="Android app settings" hidden><svg class="icon"><use href="#i-settings"/></svg></button>
     <a class="library-link" href="#saved" title="Your local library"><svg class="icon"><use href="#i-library"/></svg><span>Your library</span></a>
@@ -82,7 +86,7 @@
     </div>
     <div class="nav-group explore-nav" id="topic-navigation"></div>
   </nav>
-  <div class="sidebar-footer"><strong>Your videos. Your space.</strong><p>Your library is saved on this device.<br>No account needed.</p><span>Independent YouTube viewer</span></div>
+  <div class="sidebar-footer"><strong>Your videos. Your space.</strong><p>Your library is saved on this device.<br>No account needed.</p><button class="sidebar-backup" type="button" data-backup>Back up library</button><span>Independent YouTube viewer</span></div>
 </aside>
 <main id="main" tabindex="-1"></main>
 <dialog id="topic-dialog" aria-labelledby="topic-dialog-title">
