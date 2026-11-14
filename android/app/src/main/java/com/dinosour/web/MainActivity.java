@@ -76,6 +76,7 @@ public class MainActivity extends Activity {
     private LinearLayout startupView;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean startupReady, rendererGone;
+    private boolean backgroundPlaying, backgroundServiceRunning;
     private final Runnable startupTimeout = () -> {
         if (!startupReady && !loadFailed && !isFinishing() && !isDestroyed())
             showError("The app interface did not finish starting. Tap Try again. If it happens again, update Android System WebView using the button below.");
@@ -297,6 +298,34 @@ public class MainActivity extends Activity {
             try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + providerName))); }
             catch (Exception ignored) { toast("Update Android System WebView or Chrome in your app store."); }
         }
+    }
+
+    // The interface reports playback start/stop through the bridge. While
+    // playing, a foreground service keeps audio alive outside the app; the
+    // notification's Play/Pause button toggles the actual media element.
+    private void updateBackgroundAudio(boolean playing, String title) {
+        backgroundPlaying = playing;
+        BackgroundAudioService.playing = playing;
+        BackgroundAudioService.title = title == null ? "" : title;
+        if (playing) {
+            if (!backgroundServiceRunning) {
+                try {
+                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(new Intent(this, BackgroundAudioService.class));
+                    else startService(new Intent(this, BackgroundAudioService.class));
+                    backgroundServiceRunning = true;
+                } catch (Exception error) { backgroundServiceRunning = false; }
+            }
+        } else if (backgroundServiceRunning) {
+            backgroundServiceRunning = false;
+            stopService(new Intent(this, BackgroundAudioService.class));
+        }
+        if (backgroundServiceRunning) {
+            try { startService(new Intent(this, BackgroundAudioService.class)
+                    .setAction(BackgroundAudioService.ACTION_REFRESH)); }
+            catch (Exception ignored) { }
+        }
+        BackgroundAudioService.toggleControls = () -> runOnUiThread(() -> webView.evaluateJavascript(
+                "(function(){var v=document.getElementById('video');if(!v)return;if(v.paused){v.play()}else{v.pause()}})()", null));
     }
 
     private void hideError() {
@@ -694,6 +723,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void backgroundAudio(boolean playing, String title) {
+            runOnUiThread(() -> updateBackgroundAudio(playing, title));
+        }
+
+        @JavascriptInterface
         public void checkForUpdates() {
             runOnUiThread(() -> MainActivity.this.checkForUpdates(Config.UPDATE_ORIGIN));
         }
@@ -740,7 +774,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        if (webView != null) webView.onPause();
+        // Background audio keeps the page running while the service is active;
+        // pausing the WebView would stop the sound the user asked to keep.
+        if (webView != null && !backgroundPlaying) webView.onPause();
         super.onPause();
     }
 
@@ -753,6 +789,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         startupHandler.removeCallbacksAndMessages(null);
+        if (backgroundServiceRunning) {
+            backgroundServiceRunning = false;
+            stopService(new Intent(this, BackgroundAudioService.class));
+        }
         if (engine != null) engine.close();
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
         if (downloadReceiver != null) unregisterReceiver(downloadReceiver);

@@ -1856,3 +1856,16 @@ if (window.DinosourAndroid?.openSettings) {
 // Signal readiness after initialization, without waiting for live feed requests.
 window.__dinosourReady = true;
 window.DinosourAndroid?.appReady?.();
+// Keep the Android background-audio service in sync with the main player.
+// Only the active player element carries the #video id, so preloaded buffers
+// never trigger it.
+if (window.DinosourAndroid?.backgroundAudio) {
+  const sendAudioState = playing => window.DinosourAndroid.backgroundAudio(
+    playing, playing ? document.title.replace(/ — Dinosour$/, '') : '');
+  document.addEventListener('playing', event => {
+    if (event.target.id === 'video') sendAudioState(true);
+  }, true);
+  document.addEventListener('pause', event => {
+    if (event.target.id === 'video') sendAudioState(false);
+  }, true);
+}

@@ -26,6 +26,15 @@ try {
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('dinosour.library.v1')).saved.some(v => v.id === 'aqz-KE-bpKQ'), null, { timeout: 5000 });
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('dinosour.library.v1')));
   assert.ok(saved.saved.some(v => v.id === 'aqz-KE-bpKQ'));
+  // Background sound: closing while media plays only hides the window to the
+  // tray; the playback service must stay up. Closing is triggered from the
+  // main process, the same path the title-bar X button takes.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close());
+  const trayState = await app.evaluate(({ BrowserWindow }) => ({
+    hidden: BrowserWindow.getAllWindows().length > 0 && BrowserWindow.getAllWindows().every(w => !w.isVisible()),
+  }));
+  assert.ok(trayState.hidden, 'closing while playing must hide the window to the tray, not quit');
+  await assert.doesNotReject(fetch('http://127.0.0.1:43219/api/health', { signal: AbortSignal.timeout(5000) }));
   await app.close(); app = null;
   await assert.rejects(fetch('http://127.0.0.1:43219/api/health', { signal: AbortSignal.timeout(3000) }));
   app = await launch();
@@ -34,7 +43,7 @@ try {
   const restored = await reopened.evaluate(() => JSON.parse(localStorage.getItem('dinosour.library.v1')));
   assert.ok(restored.saved.some(v => v.id === 'aqz-KE-bpKQ'), 'saved videos must survive restart');
   assert.ok(restored.history.some(v => v.id === 'aqz-KE-bpKQ'), 'history must survive restart');
-  console.log('PASS: packaged Windows app starts, loads live feed, plays video/audio with bundled tools, persists library/history and stops its backend on exit.');
+  console.log('PASS: packaged Windows app starts, loads live feed, plays video/audio with bundled tools, keeps playing with the window closed to the tray, persists library/history and stops its backend on exit.');
 } finally {
   if (app) await app.close();
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
