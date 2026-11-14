@@ -4,7 +4,7 @@
   "artifactName": "DinosourWeb-Setup-${version}.${ext}",
   "directories": { "output": "dist" },
   "files": [
-    "desktop/main.cjs", "desktop/THIRD_PARTY_NOTICES.md", "server.js", "youtube-search.js", "audio-formats.js",
+    "desktop/main.cjs", "desktop/THIRD_PARTY_NOTICES.md", "server.js", "media-chunks.js", "youtube-search.js", "audio-formats.js",
     "public/**/*", "!public/download/**/*", "package.json",
     "android/COPYING", "android/THIRD_PARTY_NOTICES.md"
   ],

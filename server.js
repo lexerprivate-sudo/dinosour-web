@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { search, shortsFeed, shortsPool } from './youtube-search.js';
 import { selectAudioFormats, audioTrackGroups } from './audio-formats.js';
+import { createMediaChunks } from './media-chunks.js';
 
 const root = fileURLToPath(new URL('./public/', import.meta.url));
 const dataDir = fileURLToPath(new URL('./data/', import.meta.url));
@@ -192,7 +193,8 @@ function extract(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.env.YTDLP_PATH || 'yt-dlp', [
       '--ignore-config', '--no-warnings', '--no-playlist', '--socket-timeout', '12', '--retries', '1', '--extractor-retries', '1',
-      '--js-runtimes', process.env.YTDLP_JS_RUNTIME || 'node', '--remote-components', 'ejs:github', ...args,
+      '--no-js-runtimes', '--js-runtimes', process.env.YTDLP_JS_RUNTIME || 'node',
+      '--extractor-args', 'youtube:skip=hls,dash', '--remote-components', 'ejs:github', ...args,
     ], { windowsHide: true, shell: false });
     let output = '', errors = '', done = false;
     const finish = (error, data) => {
@@ -354,11 +356,13 @@ function publicError(error) {
   return 'Dinosour could not reach YouTube. Check the connection and retry.';
 }
 
+const serveChunk = createMediaChunks({ open: openMedia });
 async function serveStream(req, res, url) {
   try {
     const item = tickets.get(url.pathname.slice('/api/stream/'.length));
     if (!item || item.expires <= Date.now()) return json(res, 410, { error: 'Playback link expired. Reopen the video.' });
     if (req.headers.range && !/^bytes=\d*-\d*$/.test(req.headers.range)) return json(res, 416, { error: 'Invalid range.' });
+    if (await serveChunk(req, res, item)) return;
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     const deadline = setTimeout(() => controller.abort(), 45000);

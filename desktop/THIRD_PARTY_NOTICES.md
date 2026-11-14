@@ -14,7 +14,7 @@
 The desktop distribution is GPL-3.0. A full license copy is included as
 `android/COPYING` inside the application archive. Dinosour desktop source and
 build instructions are published at:
-https://github.com/lexerprivate-sudo/dinosour-web/tree/desktop-v1.0.0
+https://github.com/lexerprivate-sudo/dinosour-web/tree/desktop-v1.0.1
 
 The installer bundles the playback runtime at build time. No FFmpeg binary is
 bundled; the interface plays separate video and audio tracks directly.

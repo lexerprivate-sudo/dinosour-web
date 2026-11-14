@@ -1121,11 +1121,13 @@ async function watch(id, current, controller, refresh) {
       syncAudio();
       playbackBufferAhead = Math.min(ahead(video), separate ? ahead(audio) : Infinity);
       if (playbackBufferAhead < 3) discardWarmWatch();
-      if (!autoMode || disposed || retrying || switching || video.paused || !healthySince ||
-          Date.now() - healthySince < 12000 || Date.now() - lastQualityChange < 25000 || playbackBufferAhead < 15) return;
-      const cap = navigator.connection?.saveData || /2g|3g/.test(navigator.connection?.effectiveType || '') ? 480 : 1080;
-      const higher = info.qualities.map((q, i) => ({ ...q, i })).filter(q => q.height > info.qualities[selectedQuality].height && q.height <= cap).sort((a, b) => a.height - b.height)[0];
-      if (higher) loadQuality(higher.i, video.currentTime, true);
+      if (preferences.autoplay && !warmWatch && allowPrefetch()) {
+        const nextId = library.queue[0]?.id || $('#related a[href^="#watch="]')?.getAttribute('href').slice(7);
+        if (nextId && nextId !== id) prepareWatch(nextId);
+      }
+      // Progressive MP4 sources cannot switch quality seamlessly. Raising the
+      // quality here discarded a healthy buffer every 25 seconds. Keep Auto
+      // stable; its stall handler can still lower quality when necessary.
     }, 1000);
     $('#quality').onchange = () => {
       const playing = !video.paused;
@@ -1198,7 +1200,14 @@ async function reel(id, current, controller) {
   let index = list.findIndex(v => v.id === id);
   let info = null, separate = false, disposed = false, syncTimer, lastSave = 0, loadToken = 0, loadHint;
   let audioFallbacks = [], audioIndex = 0, autoRetries = 0, healthySince = 0, growing = false, navLock = 0, wheelAt = 0, recovering = false;
-  let prefetched = null, prefetchRequest = 0;
+  let prefetched = null, prefetchRequest = 0, prefetching = null;
+  const bufferedAhead = media => {
+    for (let i = 0; i < media.buffered.length; i++) {
+      if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) >= media.currentTime)
+        return media.buffered.end(i) - media.currentTime;
+    }
+    return 0;
+  };
   const idlePlayer = () => players[activePlayer === 0 ? 1 : 0];
   const clearPlayer = pair => {
     pair.video.pause(); pair.audio.pause();
@@ -1218,10 +1227,13 @@ async function reel(id, current, controller) {
     next.video.id = 'video'; next.audio.id = 'audio';
   };
   const prefetchNext = async id => {
-    if (disposed || !id || prefetched?.id === id) return;
+    if (disposed || !id || prefetched?.id === id || prefetching === id) return;
+    if (video.paused || !healthySince ||
+        Math.min(bufferedAhead(video), separate ? bufferedAhead(audio) : Infinity) < Math.min(3, video.duration - video.currentTime)) return;
     if (id === entry().id) return;
     if (navigator.connection?.saveData || ['slow-2g', '2g'].includes(navigator.connection?.effectiveType)) return;
     const request = ++prefetchRequest;
+    prefetching = id;
     try {
       const data = await shortInfo(id, controller.signal);
       if (disposed || request !== prefetchRequest || current !== generation) return;
@@ -1241,6 +1253,8 @@ async function reel(id, current, controller) {
       prefetched = { id, slot, audioSrc };
     } catch {
       if (request === prefetchRequest) prefetched = null;
+    } finally {
+      if (prefetching === id) prefetching = null;
     }
   };
   const takePrefetch = id => {
@@ -1514,7 +1528,10 @@ async function reel(id, current, controller) {
       if (Date.now() - lastSave > 5000) { saveProgress(); lastSave = Date.now(); }
     };
   }
-  syncTimer = setInterval(syncAudio, 1000);
+  syncTimer = setInterval(() => {
+    syncAudio();
+    prefetchNext(list[index + 1]?.id);
+  }, 1000);
   document.addEventListener('fullscreenchange', onFullscreenChange);
 
   const toggleMute = () => {

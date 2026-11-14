@@ -42,7 +42,7 @@ try {
     await gate;
     await route.fulfill({ json: info }).catch(() => {});
   });
-  await page.goto(`http://127.0.0.1:3210/#watch=${item.id}`);
+  await page.goto(`${process.env.TEST_URL || 'http://127.0.0.1:3210'}/#watch=${item.id}`);
   await page.locator('.watch-loading').waitFor({ state: 'visible' });
   assert.match(await page.locator('.watch-loading').innerText(), /Getting your video ready/);
   assert.ok(await page.locator('#video').getAttribute('poster'), 'cold navigation needs a thumbnail');

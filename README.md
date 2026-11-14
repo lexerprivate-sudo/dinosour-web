@@ -2,7 +2,7 @@
 
 ## Windows desktop app
 
-Download [Dinosour Web Desktop 1.0.0](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.0.0/DinosourWeb-Setup-1.0.0.exe)
+Download [Dinosour Web Desktop 1.0.1](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.0.1/DinosourWeb-Setup-1.0.1.exe)
 and run the installer. Supports Windows 10/11 x64. Open **Dinosour Web** from
 the desktop or Start menu. Node, Chromium and yt-dlp are bundled; no terminal
 or separate runtime installation is needed. Internet access is required.
@@ -17,8 +17,14 @@ The download is approximately 145 MB. Source and third-party notices are include
 in the release/tag; see `desktop/THIRD_PARTY_NOTICES.md`.
 
 Build locally: `npm ci`, `npm run build:desktop`. Output:
-`dist/DinosourWeb-Setup-1.0.0.exe`. Test the packaged app using
+`dist/DinosourWeb-Setup-1.0.1.exe`. Test the packaged app using
 `npm run test:desktop` (live internet required). Tests use an isolated profile.
+
+Desktop 1.0.1 uses bounded 1 MB media requests with one chunk of read-ahead
+per active track (64 MB shared cache), avoiding slow open-ended CDN responses.
+Auto quality no longer discards a healthy buffer to raise resolution mid-play.
+Upcoming Shorts preload after the current video's audio/video buffer is healthy;
+regular video hover and autoplay-queue prefetch reuse their buffered media.
 
 ## Android: open and watch
 

@@ -29,7 +29,7 @@ await page.route('**/api/shorts?*', route => route.fulfill({
 }));
 
 try {
-  await page.goto('http://localhost:3210/#short=H8hVCPzVCIM', { waitUntil: 'domcontentloaded' });
+  await page.goto((process.env.TEST_URL || 'http://localhost:3210') + '/#short=H8hVCPzVCIM', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
     const video = document.querySelector('#video'), audio = document.querySelector('#audio');
     return video && video.currentTime > .5 && !video.paused && audio && audio.currentTime > .2 && !audio.paused;
@@ -55,8 +55,8 @@ try {
       activeAudioSrc: document.querySelector('#audio').getAttribute('src'),
       videoReady: video.readyState,
       audioReady: audio.readyState,
-      videoBuffered: video.buffered.end(video.buffered.length - 1),
-      audioBuffered: audio.buffered.end(audio.buffered.length - 1),
+      videoBuffered: video.buffered.length ? video.buffered.end(video.buffered.length - 1) : 0,
+      audioBuffered: audio.buffered.length ? audio.buffered.end(audio.buffered.length - 1) : 0,
     };
   });
   console.log('idle player buffered in', prefetchMs, 'ms:', {
@@ -114,8 +114,8 @@ try {
     const videoSrc = video?.getAttribute('src'), audioSrc = audio?.getAttribute('src');
     return videoSrc?.includes('/api/stream/') && videoSrc !== previous.activeVideoSrc
       && video.readyState >= 2 && video.buffered.length
-      && audioSrc?.includes('/api/stream/') && audioSrc !== previous.activeAudioSrc
-      && audio.readyState >= 2 && audio.buffered.length;
+      && (!audioSrc || (audioSrc.includes('/api/stream/') && audioSrc !== previous.activeAudioSrc
+      && audio.readyState >= 2 && audio.buffered.length));
   }, before, { timeout: 60000 });
   const thirdBefore = await page.evaluate(() => {
     const wrap = document.querySelector('.reel-player:not(.active)');
@@ -136,7 +136,7 @@ try {
   const secondVideoMs = await page.evaluate(() => Math.round(performance.now() - window.__switchStarted));
   await page.waitForFunction(() => {
     const audio = document.querySelector('#audio');
-    return audio && !audio.paused && audio.currentTime > 0;
+    return audio && (!audio.getAttribute('src') || (!audio.paused && audio.currentTime > 0));
   });
   const secondAudioMs = await page.evaluate(() => Math.round(performance.now() - window.__switchStarted));
   const secondAfter = await page.evaluate(() => {
@@ -145,7 +145,7 @@ try {
     return {
       activeVideo: active.querySelector('video') === video,
       videoSrc: video.currentSrc,
-      audioSrc: audio.currentSrc,
+      audioSrc: audio.getAttribute('src'),
       videoReady: video.readyState,
       spinner: !document.querySelector('#reel-loading').hidden,
     };
@@ -162,6 +162,17 @@ try {
   console.log('PASS: the next Short buffered in the idle player, promoted without reloading, and the two player pairs alternate on repeated swipes.');
 } catch (error) {
   console.error('FAILED:', error.message);
+  console.error(await page.evaluate(() => ({
+    hash: location.hash, status: document.querySelector('#player-status')?.textContent,
+    players: [...document.querySelectorAll('.reel-player')].map(pair => ({
+      active: pair.classList.contains('active'),
+      media: [...pair.querySelectorAll('video,audio')].map(m => ({
+        src: m.getAttribute('src'), time: m.currentTime, duration: m.duration,
+        ready: m.readyState, paused: m.paused, error: m.error?.message,
+        buffer: [...Array(m.buffered.length)].map((_, i) => [m.buffered.start(i), m.buffered.end(i)]),
+      })),
+    })),
+  })));
   await page.screenshot({ path: 'test-results/prefetch-fail.png' });
   process.exitCode = 1;
 } finally {
