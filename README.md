@@ -153,6 +153,11 @@ invite link (refresh the in-app Share screen to show it).
 - **Backup and restore:** open **Backup** in the sidebar or a library page to
   download a JSON backup. Restore can merge with this device or replace its
   saved videos, history, liked videos, queue, topics, and playback settings.
+- **Storage repair:** a damaged or hand-edited local library is cleaned on load,
+  so invalid entries cannot crash the app. Unsafe thumbnail URLs are replaced,
+  duplicate items are removed, and list limits are enforced automatically.
+- **Re-unlock:** if the access code is rotated or the sign-in expires, API calls
+  take you back to the unlock page instead of leaving a bare JSON error behind.
 - **Share screen:** shows the current public link, invite link, access code,
   and same-Wi-Fi addresses, with copy buttons and a refresh action.
 - Responsive desktop and mobile layouts, including safe-area padding for notches
@@ -479,11 +484,12 @@ kept their preloaded sources, both player pairs alternate, playback starts witho
 a loading spinner, and the switch stays within a seamless-latency budget.
 `npm run test:features` mocks search, suggestions, thumbnails, and local media to
 verify Continue watching, filters/sorting/recent searches, backup export and
-merge/replace, the share dialog, playback diagnostics, and double-tap seeking.
+merge/replace, the share dialog, playback diagnostics, double-tap seeking,
+corrupt storage recovery, re-unlock navigation, and HTML proxy error handling.
 `npm test` also starts an isolated server with an access code and checks that
 loopback stays open while forwarded/public requests, APIs, and media require the
-code; it covers invite links, secure cookies, normalization, and open-redirect
-protection.
+code; it covers invite links, secure cookies, normalization, malformed cookies,
+public Host headers without proxy headers, and open-redirect protection.
 
 Independent project, not affiliated with YouTube. Titles, thumbnails, and videos
 belong to their respective creators.

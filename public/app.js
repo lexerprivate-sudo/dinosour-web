@@ -4,9 +4,9 @@ const icon = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}
 const escape = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const key = 'dinosour.library.v1';
 let library;
-try { library = JSON.parse(localStorage.getItem(key)) || {}; } catch { library = {}; }
-for (const field of ['saved', 'history', 'liked', 'queue']) if (!Array.isArray(library[field])) library[field] = [];
-library.queue = library.queue.filter(v => v && /^[\w-]{11}$/.test(v.id)).slice(0, 100);
+try { library = JSON.parse(localStorage.getItem(key)); } catch { library = null; }
+if (!library || typeof library !== 'object' || Array.isArray(library)) library = {};
+library = sanitizeLibrary(library);
 const videos = new Map();
 const infoCache = new Map();
 const infoCacheTimes = new Map();
@@ -20,9 +20,11 @@ function allowPrefetch() {
   return !playbackBusy && playbackBufferAhead >= 8 && !navigator.connection?.saveData &&
     !/(^|-)2g$/.test(navigator.connection?.effectiveType || '');
 }
-try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')) || {}; } catch {}
+try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')); } catch { preferences = null; }
+if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) preferences = {};
 preferences.topics = Array.isArray(preferences.topics) ? [...new Set(preferences.topics.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 80)).filter(Boolean))] : [];
 preferences.recentSearches = Array.isArray(preferences.recentSearches) ? [...new Set(preferences.recentSearches.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 120)).filter(Boolean))].slice(0, 8) : [];
+savePreferences();
 function savePreferences() {
   try { localStorage.setItem('dinosour.ui.v1', JSON.stringify(preferences)); } catch {}
 }
@@ -87,9 +89,28 @@ function toggle(field, id) {
   return !exists;
 }
 async function api(path, signal) {
-  const response = await fetch(path, { signal });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Could not connect. Please retry.');
+  let response;
+  try {
+    response = await fetch(path, { signal, headers: { accept: 'application/json' } });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  let data = null;
+  const type = response.headers.get('content-type') || '';
+  if (type.includes('json')) {
+    try { data = await response.json(); } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      data = null;
+    }
+  }
+  if (response.status === 401) {
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    location.assign(`/unlock?next=${encodeURIComponent(next)}`);
+    throw new Error(data?.error || 'This server needs its access code. Open the invite link again.');
+  }
+  if (!response.ok) throw new Error(data?.error || `The server answered HTTP ${response.status}. Please retry.`);
+  if (data === null) throw new Error('The server returned an unexpected response. Please retry.');
   return data;
 }
 function watchProgress(v) {
@@ -337,8 +358,19 @@ function qualityOptions(info) {
 }
 const speedOptions = () => [0.5, 0.75, 1, 1.25, 1.5, 2].map(n => `<option ${n === 1 ? 'selected' : ''} value="${n}">${n}×</option>`).join('');
 function bindInfoActions(id) {
-  $('#save').onclick = () => { const selected = toggle('saved', id); $('#save').classList.toggle('selected', selected); $('#save').setAttribute('aria-pressed', String(selected)); };
-  $('#like').onclick = () => { const selected = toggle('liked', id); $('#like').classList.toggle('selected', selected); $('#like').setAttribute('aria-pressed', String(selected)); };
+  $('#save').onclick = () => {
+    const selected = toggle('saved', id);
+    const button = $('#save');
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    button.setAttribute('aria-label', selected ? 'Remove from Watch later' : 'Save to Watch later');
+  };
+  $('#like').onclick = () => {
+    const selected = toggle('liked', id);
+    const button = $('#like');
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  };
   $('#share').onclick = async () => {
     try { await navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${id}`); toast('YouTube link copied'); } catch { toast('Copy the video link from your address bar.'); }
   };
@@ -499,22 +531,42 @@ function backupPayload() {
   for (const field of backupPreferenceKeys) if (preferences[field] !== undefined) chosen[field] = preferences[field];
   return { app: 'dinosour', version: 1, exportedAt: new Date().toISOString(), library, preferences: chosen };
 }
-function cleanLibraryItem(item, limit = 500) {
-  if (!item || !/^[\w-]{11}$/.test(item.id || '')) return null;
-  const clean = { ...compact(item), id: item.id };
-  for (const field of ['position', 'duration', 'watchedAt']) if (Number.isFinite(Number(item[field]))) clean[field] = Number(item[field]);
+function cleanLibraryItem(item) {
+  if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[\w-]{11}$/.test(item.id)) return null;
+  const text = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
+  const number = (value, max) => {
+    if (value === null || value === '' || value === undefined) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(max, Math.max(0, parsed)) : undefined;
+  };
+  const clean = { id: item.id };
+  clean.title = text(item.title, 300) || 'YouTube video';
+  clean.channel = text(item.channel, 120) || 'YouTube';
+  const thumb = text(item.thumb, 500);
+  clean.thumb = thumb && (/^\/(?!\/)/.test(thumb) || /^https:\/\//i.test(thumb)) ? thumb : `/api/thumb/${item.id}`;
+  const viewsText = text(item.viewsText, 80);
+  if (viewsText) clean.viewsText = viewsText;
+  for (const [field, max] of [['views', Number.MAX_SAFE_INTEGER], ['duration', 864000], ['position', 864000], ['watchedAt', Number.MAX_SAFE_INTEGER]]) {
+    const value = number(item[field], max);
+    if (value !== undefined) clean[field] = value;
+  }
   if (item.continueHidden) clean.continueHidden = true;
   if (item.type === 'short') clean.type = 'short';
   return clean;
 }
-function sanitizeBackup(data) {
-  if (!data || data.app !== 'dinosour' || !data.library) throw new Error('This is not a Dinosour backup file.');
+function sanitizeLibrary(source) {
   const clean = {};
   for (const field of ['saved', 'history', 'liked', 'queue']) {
-    const list = Array.isArray(data.library[field]) ? data.library[field] : [];
+    const list = Array.isArray(source?.[field]) ? source[field] : [];
     const seen = new Set();
-    clean[field] = list.map(item => cleanLibraryItem(item, field === 'saved' ? 500 : 200)).filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, field === 'saved' ? 500 : 200);
+    const limit = field === 'queue' ? 100 : field === 'history' ? 200 : 500;
+    clean[field] = list.map(cleanLibraryItem).filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, limit);
   }
+  return clean;
+}
+function sanitizeBackup(data) {
+  if (!data || data.app !== 'dinosour' || !data.library || typeof data.library !== 'object') throw new Error('This is not a Dinosour backup file.');
+  const clean = sanitizeLibrary(data.library);
   const input = data.preferences && typeof data.preferences === 'object' ? data.preferences : {};
   const prefs = {};
   for (const field of backupPreferenceKeys) if (input[field] !== undefined) prefs[field] = input[field];
@@ -1073,20 +1125,27 @@ async function watch(id, current, controller, refresh) {
 
 const shortInfo = (id, signal, refresh) => {
   if (!refresh && infoCache.has(id) && Date.now() - infoCacheTimes.get(id) < 120000) return Promise.resolve(infoCache.get(id));
-  const request = api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, signal).then(info => {
-    infoCache.set(id, info);
-    infoCacheTimes.set(id, Date.now());
+  let request;
+  request = api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, signal).then(info => {
+    // An older prefetch may finish after a refresh. Only the current request
+    // owns this cache entry; evicted requests must not reinsert themselves.
+    if (infoCache.get(id) === request) {
+      infoCache.set(id, info);
+      infoCacheTimes.set(id, Date.now());
+    }
     return info;
   });
-  if (!refresh) {
-    infoCache.set(id, request);
-    infoCacheTimes.set(id, Date.now());
-    if (infoCache.size > 20) {
-      const oldest = infoCache.keys().next().value;
-      infoCache.delete(oldest); infoCacheTimes.delete(oldest);
-    }
-    request.catch(() => { if (infoCache.get(id) === request) infoCache.delete(id); });
+  // Cache the in-flight request as well, so a concurrent prefetch or retry
+  // cannot fall back to the old stream tickets while fresh metadata loads.
+  infoCache.set(id, request);
+  infoCacheTimes.set(id, Date.now());
+  if (infoCache.size > 20) {
+    const oldest = infoCache.keys().next().value;
+    infoCache.delete(oldest); infoCacheTimes.delete(oldest);
   }
+  request.catch(() => {
+    if (infoCache.get(id) === request) { infoCache.delete(id); infoCacheTimes.delete(id); }
+  });
   return request;
 };
 
@@ -1720,7 +1779,7 @@ document.addEventListener('fullscreenchange', () => {
   button.setAttribute('aria-label', document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen');
 });
 document.addEventListener('keydown', event => {
-  if ($('#topic-dialog').open) return;
+  if (document.querySelector('dialog[open]')) return;
   if (event.key === 'Escape') { closeNavigation(); $('#search').blur(); }
   if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement?.tagName)) return;
   if (event.key === '/') { event.preventDefault(); $('#search').focus(); return; }

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import os from 'node:os';
+import { isIP } from 'node:net';
 import { spawn, execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -38,18 +39,20 @@ function lanAddresses() {
   return [...addresses].map(address => `http://${address}:${port}`);
 }
 
-const accessHash = code => createHash('sha256').update(String(code)).digest('hex');
+const normalizeAccess = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const accessHash = code => createHash('sha256').update(normalizeAccess(code)).digest('hex');
 const secureEqual = (a, b) => {
-  if (!a || !b || a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  if (!a || !b) return false;
+  const left = Buffer.from(a), right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
 };
-let accessCache = { at: 0, code: process.env.ACCESS_CODE?.trim() || '' };
+let accessCache = { at: 0, code: normalizeAccess(process.env.ACCESS_CODE) };
 async function accessCode() {
-  if (process.env.ACCESS_CODE !== undefined) return process.env.ACCESS_CODE.trim();
+  if (process.env.ACCESS_CODE !== undefined) return normalizeAccess(process.env.ACCESS_CODE);
   if (Date.now() - accessCache.at < 1500) return accessCache.code;
   let code = '';
   try { code = JSON.parse(await readFile(dataDir + 'access.json', 'utf8')).code || ''; } catch { /* Public sharing is off. */ }
-  accessCache = { at: Date.now(), code: String(code).trim() };
+  accessCache = { at: Date.now(), code: normalizeAccess(code) };
   return accessCache.code;
 }
 let publicCache = { at: 0, value: null };
@@ -65,36 +68,85 @@ async function publicDetails() {
   publicCache = { at: Date.now(), value };
   return value;
 }
+const privateAddress = value => {
+  const address = String(value || '').replace(/^::ffff:/i, '').toLowerCase();
+  if (!isIP(address)) return false;
+  return /^127\./.test(address) || address === '::1' || /^10\./.test(address) ||
+    /^192\.168\./.test(address) || /^172\.(1[6-9]|2\d|3[01])\./.test(address) ||
+    /^169\.254\./.test(address) || /^fe80:/i.test(address) || /^f[cd][0-9a-f]{2}:/i.test(address);
+};
+const privateHost = value => {
+  const raw = String(value || '').split(',')[0].trim().toLowerCase();
+  if (!raw) return false;
+  let hostname;
+  try { hostname = new URL(`http://${raw}`).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
+  return hostname === 'localhost' || hostname.endsWith('.local') || privateAddress(hostname);
+};
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[character]));
+// Only allow paths on this origin. Browsers treat backslashes like slashes, so
+// "/\\evil.example" and "/%5Cevil.example" must be rejected as redirects too.
+function safeNextPath(value) {
+  const requested = String(value ?? '');
+  if (!requested.startsWith('/') || requested.startsWith('//')) return '/';
+  if (/[\\\u0000-\u001f\u007f]/.test(requested)) return '/';
+  try {
+    const base = 'http://dinosour.invalid';
+    const target = new URL(requested, base);
+    if (target.origin !== base) return '/';
+    const path = decodeURIComponent(target.pathname);
+    if (!path.startsWith('/') || path.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(path)) return '/';
+    if (/^\/unlock(?:[/?#]|$)/i.test(path)) return '/';
+    return target.pathname + target.search + target.hash;
+  } catch { return '/'; }
+}
 function cookie(req, name) {
   for (const part of String(req.headers.cookie || '').split(';')) {
     const index = part.indexOf('=');
-    if (index > 0 && part.slice(0, index).trim() === name) return decodeURIComponent(part.slice(index + 1).trim());
+    if (index > 0 && part.slice(0, index).trim() === name) {
+      try { return decodeURIComponent(part.slice(index + 1).trim()); } catch { return ''; }
+    }
   }
   return '';
 }
 function setAccessCookie(req, res, code) {
-  const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  let secure = proto === 'https';
+  if (!secure && publicOrigin.startsWith('https://')) {
+    try {
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      secure = host.toLowerCase() === new URL(publicOrigin).host.toLowerCase();
+    } catch { /* Keep the cookie usable on a local HTTP request. */ }
+  }
   res.setHeader('set-cookie', `dinosour_access=${accessHash(code)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`);
 }
 function unlockPage(next = '/', error = '') {
+  const target = safeNextPath(next);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f0f0f"><title>Unlock Dinosour</title>
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f0f0f;color:#f1f1f1;font:15px/1.5 Roboto,Arial,sans-serif;padding:24px;box-sizing:border-box}main{width:min(390px,100%);background:#181818;border:1px solid #303030;border-radius:16px;padding:28px;box-shadow:0 20px 70px #0008}h1{margin:0 0 6px;font-size:24px}p{color:#aaa;margin:0 0 20px}label{display:block;font-size:13px;margin-bottom:7px}input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #3f3f3f;border-radius:8px;background:#0f0f0f;color:#f1f1f1;font:inherit;text-transform:uppercase;letter-spacing:.08em}button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:999px;background:#f1f1f1;color:#0f0f0f;font:inherit;font-weight:700;cursor:pointer}.error{color:#ff8a8a;font-size:13px;margin:0 0 14px}.note{font-size:12px;color:#777;margin:18px 0 0}.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:20px;margin-bottom:22px}.brand img{width:33px;height:24px}</style></head>
-<body><main><div class="brand"><img src="/icon.svg" alt="">Dinosour</div><h1>Enter access code</h1><p>This Dinosour server is shared privately. Use the code from the person who sent you the link.</p>${error ? `<p class="error">${error}</p>` : ''}<form method="get" action="/unlock"><input type="hidden" name="next" value="${next.replace(/"/g, '&quot;')}"><label for="code">Access code</label><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit">Open Dinosour</button></form><p class="note">After unlocking, this device stays signed in.</p></main></body></html>`;
+<body><main><div class="brand"><img src="/icon.svg" alt="">Dinosour</div><h1>Enter access code</h1><p>This Dinosour server is shared privately. Use the code from the person who sent you the link.</p>${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}<form method="get" action="/unlock"><input type="hidden" name="next" value="${escapeHtml(target)}"><label for="code">Access code</label><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit">Open Dinosour</button></form><p class="note">After unlocking, this device stays signed in.</p></main></body></html>`;
 }
 function wantsHtml(req) {
   return String(req.headers.accept || '').includes('text/html');
 }
 async function allowRequest(req, res, url, code) {
   if (!code) return true;
-  const forwarded = req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto'] ||
-    req.headers['x-forwarded-for'] || req.headers['cf-connecting-ip'] || req.headers['cf-ray'];
-  const remote = String(req.socket.remoteAddress || '');
-  const privateClient = !forwarded && (/^127\./.test(remote) || remote === '::1' || remote === '::ffff:127.0.0.1' ||
-    /^10\./.test(remote) || /^192\.168\./.test(remote) || /^172\.(1[6-9]|2\d|3[01])\./.test(remote) ||
-    /^169\.254\./.test(remote) || /^fe80:/i.test(remote) || /^f[cd][0-9a-f]{2}:/i.test(remote));
+  const forwarded = ['x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-for', 'x-real-ip', 'forwarded', 'cf-connecting-ip', 'cf-ray']
+    .some(header => Boolean(req.headers[header]));
+  const requestHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  let configuredHost = '';
+  if (publicOrigin) {
+    try { configuredHost = new URL(publicOrigin).host.toLowerCase(); } catch { /* Ignore malformed PUBLIC_ORIGIN. */ }
+  }
+  // A private socket is not enough on its own: tunnels and reverse proxies may
+  // connect over loopback. Only trust it when the Host is local too, and never
+  // when the configured public host is being requested.
+  const privateClient = !forwarded && privateAddress(req.socket.remoteAddress) && privateHost(requestHost) &&
+    (!configuredHost || requestHost.toLowerCase() !== configuredHost);
   if (privateClient) return true;
   if (url.pathname === '/unlock') {
-    const supplied = (url.searchParams.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const supplied = normalizeAccess(url.searchParams.get('code'));
     if (!supplied) {
       res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       res.end(req.method === 'HEAD' ? undefined : unlockPage(url.searchParams.get('next') || '/'));
@@ -106,13 +158,12 @@ async function allowRequest(req, res, url, code) {
       return false;
     }
     setAccessCookie(req, res, code);
-    const requested = url.searchParams.get('next') || '/';
-    const next = requested.startsWith('/') && !requested.startsWith('//') && !requested.startsWith('/unlock') ? requested : '/';
+    const next = safeNextPath(url.searchParams.get('next') || '/');
     res.writeHead(303, { location: next, 'cache-control': 'no-store' });
     res.end();
     return false;
   }
-  const queryAccess = (url.searchParams.get('access') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const queryAccess = normalizeAccess(url.searchParams.get('access'));
   if (queryAccess && secureEqual(accessHash(queryAccess), accessHash(code))) {
     setAccessCookie(req, res, code);
     url.searchParams.delete('access');
@@ -220,6 +271,9 @@ function mediaBaseFor(req) {
   // A tunnel or reverse proxy only forwards the app port. Keep media on the
   // same public origin instead of pointing the browser at an internal port.
   if (req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']) return origin;
+  // Without forwarding headers, relative URLs preserve the public HTTPS
+  // origin instead of guessing an internal scheme or media port.
+  if (!privateHost(req.headers.host)) return '';
   if (!mediaBase || mediaPort === port) return origin;
   try {
     const url = new URL(origin);
@@ -251,7 +305,7 @@ async function getVideo(id) {
     // Vertical Shorts report 1080x1920. Use the shorter side for quality labels,
     // so a portrait 720x1280 stream is "720p" rather than "1280p".
     const qualityOf = f => Math.min(f.width || 0, f.height || 0) || f.height || 0;
-    const video = formats.filter(f => f.vcodec?.startsWith('avc1') && qualityOf(f) <= 1080).sort((a, b) => qualityOf(b) - qualityOf(a) || (b.tbr || 0) - (a.tbr || 0));
+    const video = formats.filter(f => f.vcodec?.startsWith('avc1') && qualityOf(f) > 0 && qualityOf(f) <= 1080).sort((a, b) => qualityOf(b) - qualityOf(a) || (b.tbr || 0) - (a.tbr || 0));
     // Keep alternative AAC tracks as fallbacks. A single signed media URL can
     // occasionally be refused by YouTube mid-play; the browser can switch to a
     // different track without asking the user to reopen the whole video.
@@ -292,6 +346,12 @@ async function getVideo(id) {
 function json(res, status, data) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(data));
+}
+
+function publicError(error) {
+  const message = String(error?.message || '').trim();
+  if (message && message.length <= 240 && !/[\r\n]|ENOENT|EACCES|EPERM|ECONN|ECONNRESET|node:internal|[A-Za-z]:\\/i.test(message)) return message;
+  return 'Dinosour could not reach YouTube. Check the connection and retry.';
 }
 
 async function serveStream(req, res, url) {
@@ -367,7 +427,9 @@ const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   if (origin && origin !== publicOrigin && ![`http://localhost:${port}`, `http://127.0.0.1:${port}`].includes(origin) && origin !== requestOrigin(req)) return json(res, 403, { error: 'Cross-origin requests are not allowed.' });
   if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { error: 'Method not allowed.' });
-  const url = new URL(req.url, `http://127.0.0.1:${port}`);
+  let url;
+  try { url = new URL(req.url, `http://127.0.0.1:${port}`); }
+  catch { return json(res, 400, { error: 'Invalid request URL.' }); }
   try {
     const code = await accessCode();
     if (!await allowRequest(req, res, url, code)) return;
@@ -524,17 +586,24 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     if (res.destroyed) return;
     if (res.headersSent) return res.destroy();
-    json(res, 502, { error: 'The video stream was interrupted. Please retry.' });
+    console.error(`${req.method} ${url.pathname} failed: ${error.message}`);
+    json(res, 502, { error: publicError(error) });
   }
 });
 const mediaServer = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   if (!['GET', 'HEAD'].includes(req.method)) return json(res, 405, { error: 'Method not allowed.' });
-  const url = new URL(req.url, `http://127.0.0.1:${mediaPort}`);
-  if (!url.pathname.startsWith('/api/stream/')) return json(res, 404, { error: 'Not found.' });
-  if (!await allowRequest(req, res, url, await accessCode())) return;
-  serveStream(req, res, url);
+  let url;
+  try { url = new URL(req.url, `http://127.0.0.1:${mediaPort}`); }
+  catch { return json(res, 400, { error: 'Invalid request URL.' }); }
+  try {
+    if (!url.pathname.startsWith('/api/stream/')) return json(res, 404, { error: 'Not found.' });
+    if (!await allowRequest(req, res, url, await accessCode())) return;
+    await serveStream(req, res, url);
+  } catch {
+    if (!res.destroyed && !res.headersSent) json(res, 502, { error: 'The video stream was interrupted. Please retry.' });
+  }
 });
 mediaServer.on('error', error => {
   console.error(error.code === 'EADDRINUSE' ? `Media port ${mediaPort} is busy; streams will use port ${port}.` : error.message);
@@ -559,4 +628,8 @@ server.listen(port, host, async () => {
     else execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [url]);
   }
 });
-server.on('error', (error) => { console.error(error.code === 'EADDRINUSE' ? `Port ${port} is busy. Set PORT to another port.` : error.message); process.exitCode = 1; });
+server.on('error', (error) => {
+  console.error(error.code === 'EADDRINUSE' ? `Port ${port} is busy. Set PORT to another port.` : error.message);
+  process.exitCode = 1;
+  if (mediaServer.listening) mediaServer.close();
+});

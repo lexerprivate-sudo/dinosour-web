@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
 import net from 'node:net';
 
 async function freePort() {
@@ -10,6 +11,22 @@ async function freePort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
   return port;
+}
+
+function request(url, { headers = {}, method = 'GET' } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, { method, headers }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 test('access code protects public clients while loopback and health checks stay open', async t => {
@@ -69,6 +86,24 @@ test('access code protects public clients while loopback and health checks stay 
   assert.equal((await fetch(base + '/icon.svg', { headers: publicHeaders })).status, 200);
   assert.equal((await fetch(base + '/app-update.json', { headers: publicHeaders })).status, 200);
 
+  // Tunnels and local reverse proxies can connect over loopback without
+  // forwarding headers. A public Host must still require the code.
+  const proxiedRoot = await request(base + '/', { headers: { host: 'public.example.com', accept: 'text/html' } });
+  assert.equal(proxiedRoot.status, 401);
+  assert.match(proxiedRoot.body, /Enter access code/);
+  const proxiedApi = await request(base + '/api/network', { headers: { host: 'public.example.com' } });
+  assert.equal(proxiedApi.status, 401);
+  assert.match(JSON.parse(proxiedApi.body).error, /access code/i);
+  const proxiedMedia = await request(media + '/api/stream/invalid', { headers: { host: 'public.example.com' } });
+  assert.equal(proxiedMedia.status, 401);
+  for (const host of ['127.0.0.1.evil.example', '10.evil.example', '192.168.evil.example']) {
+    assert.equal((await request(base + '/api/network', { headers: { host } })).status, 401);
+  }
+  for (const cookie of ['dinosour_access=%ZZ', `dinosour_access=${'%C3%A9'.repeat(64)}`]) {
+    assert.equal((await fetch(base + '/api/network', { headers: { ...publicHeaders, cookie } })).status, 401);
+    assert.equal((await fetch(media + '/api/stream/invalid', { headers: { ...publicHeaders, cookie } })).status, 401);
+  }
+
   // Wrong, missing and malformed invites stay locked.
   assert.equal((await fetch(base + '/unlock', { headers: publicHeaders })).status, 401);
   const wrong = await fetch(base + '/unlock?code=NOPE', { headers: { ...publicHeaders, accept: 'text/html' } });
@@ -96,6 +131,11 @@ test('access code protects public clients while loopback and health checks stay 
   const redirect = await fetch(base + '/unlock?code=TESTCODE12&next=//evil.example', { headers: publicHeaders, redirect: 'manual' });
   assert.equal(redirect.status, 303);
   assert.equal(redirect.headers.get('location'), '/');
+  for (const next of ['/%5Cevil.example', '/%2F%2Fevil.example', '/unlock?code=TESTCODE12', 'https://evil.example', '/%0d%0aLocation:%20https://evil.example']) {
+    const unsafe = await fetch(base + `/unlock?code=TESTCODE12&next=${encodeURIComponent(next)}`, { headers: publicHeaders, redirect: 'manual' });
+    assert.equal(unsafe.status, 303, `unlock should still succeed for ${next}`);
+    assert.equal(unsafe.headers.get('location'), '/', `unsafe next path was accepted: ${next}`);
+  }
 
   // Media has the same gate; a tunneled request cannot stream without the
   // unlock cookie even though the media listener is local.

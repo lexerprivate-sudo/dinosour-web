@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -25,8 +25,12 @@ let shuttingDown = false;
 let currentUrl = '';
 let stable = false;
 
-const cleanCode = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+const cleanCode = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const grouped = value => value.length > 5 ? `${value.slice(0, 5)}-${value.slice(5)}` : value;
+// 32 unambiguous characters, so each random byte maps exactly and the code is
+// always ten characters long.
+const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateCode = () => Array.from(randomBytes(10), byte => codeAlphabet[byte % codeAlphabet.length]).join('');
 
 async function ensureDirs() {
   await mkdir(dataDir, { recursive: true });
@@ -41,7 +45,7 @@ async function accessCode(force = rotate) {
       if (existing.length >= 8) return existing;
     } catch { /* First public run. */ }
   }
-  const code = randomBytes(9).toString('base64url').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+  const code = generateCode();
   await writeFile(accessFile, JSON.stringify({ code, createdAt: new Date().toISOString() }, null, 2));
   return code;
 }
@@ -71,7 +75,7 @@ async function ensureServer() {
     console.log(`Using the Dinosour server already running on port ${port}.`);
     return;
   }
-  console.log('Starting the Dinosour server…');
+  console.log('Starting the Dinosour server...');
   serverChild = spawn(process.execPath, ['server.js'], {
     cwd: root, env: { ...process.env, HOST: host, PORT: String(port) }, stdio: 'inherit', windowsHide: true,
   });
@@ -93,7 +97,7 @@ function usableCloudflared(executable) {
 async function downloadCloudflared(executable) {
   const asset = process.platform === 'win32' ? 'cloudflared-windows-amd64.exe'
     : process.platform === 'darwin' ? 'cloudflared-darwin-amd64.tgz' : 'cloudflared-linux-amd64';
-  console.log('Downloading the Cloudflare tunnel client (one time, about 55 MB)…');
+  console.log('Downloading the Cloudflare tunnel client (one time, about 55 MB)...');
   const response = await fetch(`https://github.com/cloudflare/cloudflared/releases/latest/download/${asset}`, { redirect: 'follow' });
   if (!response.ok) throw new Error(`Cloudflared download failed (HTTP ${response.status}).`);
   if (asset.endsWith('.tgz')) {
@@ -103,6 +107,7 @@ async function downloadCloudflared(executable) {
   } else {
     await pipeline(Readable.fromWeb(response.body), createWriteStream(executable));
   }
+  if (process.platform !== 'win32') await chmod(executable, 0o755).catch(() => {});
   if (!usableCloudflared(executable)) {
     await rm(executable, { force: true });
     throw new Error('The tunnel download was incomplete. Check your connection and try again.');
@@ -139,35 +144,33 @@ function tailscaleUrl() {
 async function startCloudflaredQuick() {
   const executable = await ensureCloudflared();
   return new Promise((resolve, reject) => {
-    let settled = false, output = '';
+    let settled = false, output = '', timer;
     const child = spawn(executable, ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate', '--loglevel', 'info'], {
       windowsHide: true,
     });
     tunnelChild = child;
+    const settle = (finish, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      finish(value);
+    };
     const onOutput = chunk => {
       const text = chunk.toString();
       output = (output + text).slice(-8000);
       const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
-      if (match && !settled) {
-        settled = true;
-        resolve(match[0]);
-      }
+      if (match) settle(resolve, match[0]);
     };
     child.stdout.on('data', onOutput);
     child.stderr.on('data', onOutput);
-    child.on('error', error => { if (!settled) { settled = true; reject(error); } });
+    child.on('error', error => settle(reject, error));
     child.on('exit', code => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Cloudflare tunnel exited (${code}). ${output.trim().slice(-400)}`));
-      }
+      settle(reject, new Error(`Cloudflare tunnel exited (${code}). ${output.trim().slice(-400)}`));
     });
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill();
-        reject(new Error('The Cloudflare tunnel did not return an address. Check data/tunnel.log or your network/firewall.'));
-      }
+    timer = setTimeout(() => {
+      if (settled) return;
+      settle(reject, new Error('The Cloudflare tunnel did not return an address. Check data/tunnel.log or your network/firewall.'));
+      child.kill();
     }, 45000);
   });
 }
@@ -187,7 +190,7 @@ function monitorTunnel(label, restart) {
   if (!tunnelChild) return;
   tunnelChild.on('exit', code => {
     if (shuttingDown) return;
-    console.error(`\n${label} stopped (${code}). Reconnecting in 4 seconds…`);
+    console.error(`\n${label} stopped (${code}). Reconnecting in 4 seconds...`);
     clearPublic().catch(() => {});
     setTimeout(restart, 4000);
   });
@@ -210,8 +213,17 @@ async function startQuickLoop() {
   await connect();
 }
 
-function printShare(url) {
+function printShare(url, lanOnly = false) {
   console.log('');
+  if (lanOnly) {
+    console.log('  Dinosour is available on your local network:');
+    console.log(`  LAN link:     ${url}`);
+    console.log('');
+    console.log('  Devices on the same Wi-Fi do not need an access code.');
+    console.log('  This command does not start a public tunnel. Run "npm run share" for a link to another country.');
+    console.log('');
+    return;
+  }
   console.log('  Dinosour is available outside your Wi-Fi:');
   console.log(`  Public link:  ${url}`);
   console.log(`  Access code:  ${grouped(code)}`);
@@ -245,8 +257,8 @@ async function main() {
     const lan = Object.values((await import('node:os')).networkInterfaces()).flat()
       .filter(address => address && address.family === 'IPv4' && !address.internal)
       .map(address => `http://${address.address}:${port}`);
-    console.log(`\nLAN access: ${lan.join(', ')}\nAccess code: ${grouped(code)}\n`);
-    printShare(lan[0] || `http://localhost:${port}`);
+    console.log(`\nLAN access: ${lan.join(', ')}\n`);
+    printShare(lan[0] || `http://localhost:${port}`, true);
     return;
   }
 
@@ -256,14 +268,14 @@ async function main() {
     (await readFile(path.join(dataDir, 'public-origin.txt'), 'utf8').catch(() => '')).trim()).replace(/\/+$/, '');
 
   if (providerArg === 'tailscale' || (providerArg === 'auto' && !cloudflareToken && commandExists('tailscale') && args.includes('--stable'))) {
-    console.log('Enabling Tailscale Funnel…');
+    console.log('Enabling Tailscale Funnel...');
     const url = tailscaleUrl();
     await writePublic(url, 'tailscale');
     printShare(url);
     return;
   }
   if (cloudflareToken && configuredOrigin) {
-    console.log(`Starting the stable Cloudflare tunnel for ${configuredOrigin}…`);
+    console.log(`Starting the stable Cloudflare tunnel for ${configuredOrigin}...`);
     await startCloudflaredNamed(cloudflareToken, configuredOrigin);
     await writePublic(configuredOrigin, 'configured-cloudflare');
     printShare(configuredOrigin);
@@ -277,24 +289,24 @@ async function main() {
   await startQuickLoop();
 }
 
-async function shutdown(signal) {
+async function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`\nStopping public access (${signal ?? 'exit'})…`);
+  console.log(`\nStopping public access (${signal ?? 'exit'})...`);
   if (currentUrl) await clearPublic().catch(() => {});
   if (tunnelChild && tunnelChild.exitCode == null) tunnelChild.kill();
   if (serverStarted && serverChild && serverChild.exitCode == null) serverChild.kill();
-  process.exit(0);
+  process.exit(exitCode);
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', error => {
   console.error(error.stack || error.message);
-  shutdown('error');
+  shutdown('error', 1);
 });
 
 main().catch(error => {
   console.error(error.message);
-  shutdown('error');
+  shutdown('error', 1);
 });

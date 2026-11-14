@@ -243,8 +243,64 @@ try {
   assert.equal(await page.locator('.gesture-hint').innerText(), '+10 seconds');
   await page.waitForFunction(() => Math.abs(document.querySelector('#video').currentTime - 20) < 1.2);
 
+  // Corrupt or hand-edited storage must not crash the app. Valid items survive,
+  // bad fields are normalized, and unsafe thumbnail URLs are replaced. Seed it
+  // in an init script so the outgoing page cannot persist its own library first.
+  await page.addInitScript(key => {
+    localStorage.setItem(key, JSON.stringify({
+      saved: [null, { id: 'bad' }, { id: 'aqz-KE-bpKQ', title: 123, channel: null, thumb: 'javascript:alert(1)' }],
+      history: 'not-a-list',
+      liked: [{ id: 'jNQXAC9IVRw', title: 'Liked video', position: 'not-a-number' }],
+      queue: [{ id: 'zzzzzzzzzzz', title: 'Queued video' }],
+    }));
+    localStorage.setItem('dinosour.ui.v1', JSON.stringify({ topics: ['Saved topic', 7, null], volume: 'loud' }));
+  }, libraryKey);
+  await page.goto(base + '/?storage=corrupt#home', { waitUntil: 'domcontentloaded' });
+  await page.locator('#feed .card').first().waitFor();
+  const sanitized = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), libraryKey);
+  assert.deepEqual(sanitized.saved.map(item => item.id), ['aqz-KE-bpKQ']);
+  assert.equal(sanitized.saved[0].title, 'YouTube video');
+  assert.equal(sanitized.saved[0].channel, 'YouTube');
+  assert.equal(sanitized.saved[0].thumb, '/api/thumb/aqz-KE-bpKQ');
+  assert.deepEqual(sanitized.history, []);
+  assert.deepEqual(sanitized.liked.map(item => item.id), ['jNQXAC9IVRw']);
+  assert.deepEqual(sanitized.queue.map(item => item.id), ['zzzzzzzzzzz']);
+  const sanitizedPrefs = await page.evaluate(() => JSON.parse(localStorage.getItem('dinosour.ui.v1')));
+  assert.deepEqual(sanitizedPrefs.topics, ['Saved topic']);
+
+  // A revoked/rotated access code must take the user to the unlock page instead
+  // of leaving the app stuck on a JSON error.
+  const authPage = await browser.newPage({ viewport: { width: 900, height: 700 }, serviceWorkers: 'block' });
+  const authErrors = [];
+  authPage.on('pageerror', error => authErrors.push(error.message));
+  await authPage.route('**/api/search?*', route => route.fulfill({
+    status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'This server needs its access code.' }),
+  }));
+  await authPage.route('**/unlock?*', route => route.fulfill({
+    status: 200, contentType: 'text/html', body: '<h1>Unlock Dinosour</h1>',
+  }));
+  await authPage.goto(base + '/#home', { waitUntil: 'domcontentloaded' });
+  await authPage.waitForURL(url => url.pathname === '/unlock', { timeout: 15000 });
+  assert.equal(new URL(authPage.url()).searchParams.get('next'), '/#home');
+  assert.deepEqual(authErrors, []);
+  await authPage.close();
+
+  // A proxy HTML error page is reported clearly instead of throwing an
+  // unreadable JSON parse error.
+  const brokenPage = await browser.newPage({ viewport: { width: 900, height: 700 }, serviceWorkers: 'block' });
+  const brokenErrors = [];
+  brokenPage.on('pageerror', error => brokenErrors.push(error.message));
+  await brokenPage.route('**/api/search?*', route => route.fulfill({
+    status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>',
+  }));
+  await brokenPage.goto(base + '/#home', { waitUntil: 'domcontentloaded' });
+  await brokenPage.locator('.empty').waitFor();
+  assert.match(await brokenPage.locator('.empty').innerText(), /HTTP 502/);
+  assert.deepEqual(brokenErrors, []);
+  await brokenPage.close();
+
   assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);
-  console.log('PASS: Continue watching, search suggestions/filters, backup merge/replace, share dialog, diagnostics, touch seeking and persistence.');
+  console.log('PASS: Continue watching, search suggestions/filters, backup merge/replace, share dialog, diagnostics, touch seeking, corrupt storage, re-unlock and persistence.');
 } finally {
   await browser.close();
 }
