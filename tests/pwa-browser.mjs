@@ -13,8 +13,10 @@ try {
   });
   assert.equal(registration.active, 'activated', `service worker did not activate: ${JSON.stringify(registration)}`);
   assert.ok(registration.scope.startsWith(base + '/'), `unexpected service worker scope: ${registration.scope}`);
-  assert.ok(registration.caches.includes('dinosour-shell-v2'), `shell cache missing: ${JSON.stringify(registration.caches)}`);
-  assert.equal(await page.evaluate(async () => !!(await (await caches.open('dinosour-shell-v2')).match('/native.js'))), true, 'native bootstrap must be available offline');
+  assert.ok(registration.caches.includes('dinosour-shell-v3'), `shell cache missing: ${JSON.stringify(registration.caches)}`);
+  for (const path of ['/native.js', '/startup.js']) {
+    assert.equal(await page.evaluate(async path => !!(await (await caches.open('dinosour-shell-v3')).match(path)), path), true, `${path} must be available offline`);
+  }
 
   await page.waitForTimeout(1000);
   await page.reload({ waitUntil: 'load' });

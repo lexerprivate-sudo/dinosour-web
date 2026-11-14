@@ -73,6 +73,13 @@ public class MainActivity extends Activity {
     private String pendingBackup;
     private static final int OPEN_BACKUP = 501, SAVE_BACKUP = 502;
     private static final String[] STORAGE_KEYS = {"dinosour.library.v1", "dinosour.ui.v1"};
+    private LinearLayout startupView;
+    private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean startupReady, rendererGone;
+    private final Runnable startupTimeout = () -> {
+        if (!startupReady && !loadFailed && !isFinishing() && !isDestroyed())
+            showError("The app interface did not finish starting. Tap Try again. If it happens again, update Android System WebView using the button below.");
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,7 +90,7 @@ public class MainActivity extends Activity {
         setupWindow();
         buildLayout();
         engine = new NativeEngine(this, (id, payload) -> runOnUiThread(() -> {
-            if (!isFinishing() && !isDestroyed())
+            if (!isFinishing() && !isDestroyed() && webView != null)
                 webView.evaluateJavascript("window.__dinosourNativeResult && window.__dinosourNativeResult(" +
                         JSONObject.quote(id) + "," + payload.toString() + ");", null);
         }));
@@ -109,7 +116,7 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         webView.setBackgroundColor(BG);
-        webView.setVisibility(View.INVISIBLE);
+        webView.setVisibility(View.VISIBLE);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setUserAgentString(NativeEngine.USER_AGENT);
@@ -146,6 +153,24 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.GONE);
         root.addView(progress, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2), Gravity.TOP));
 
+        startupView = new LinearLayout(this);
+        startupView.setOrientation(LinearLayout.VERTICAL);
+        startupView.setGravity(Gravity.CENTER);
+        startupView.setBackgroundColor(BG);
+        startupView.setPadding(dp(28), dp(28), dp(28), dp(28));
+        TextView startupTitle = new TextView(this);
+        startupTitle.setText("Dinosour");
+        startupTitle.setTextColor(Color.WHITE);
+        startupTitle.setTextSize(28);
+        startupView.addView(startupTitle);
+        TextView startupText = new TextView(this);
+        startupText.setText("Opening your videos…");
+        startupText.setTextColor(Color.LTGRAY);
+        startupText.setTextSize(16);
+        startupText.setPadding(0, dp(12), 0, dp(24));
+        startupView.addView(startupText);
+        startupView.addView(new ProgressBar(this));
+        root.addView(startupView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         buildErrorView();
         setContentView(root);
     }
@@ -159,7 +184,7 @@ public class MainActivity extends Activity {
         errorView.setVisibility(View.GONE);
 
         TextView title = new TextView(this);
-        title.setText("Can't reach Dinosour");
+        title.setText("Couldn't open Dinosour");
         title.setTextColor(Color.WHITE);
         title.setTextSize(24);
         title.setGravity(Gravity.CENTER);
@@ -173,7 +198,7 @@ public class MainActivity extends Activity {
         errorView.addView(errorDetail);
 
         TextView hint = new TextView(this);
-        hint.setText("Dinosour runs on this phone. Connect to Wi-Fi or mobile data, then try again.");
+        hint.setText("Dinosour runs on this phone. Retrying or updating WebView does not erase your library.");
         hint.setTextColor(Color.rgb(170, 170, 170));
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -182,7 +207,10 @@ public class MainActivity extends Activity {
 
         Button retry = new Button(this);
         retry.setText("Try again");
-        retry.setOnClickListener(v -> loadServer());
+        retry.setOnClickListener(v -> {
+            if (rendererGone) recreate();
+            else loadServer();
+        });
         LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         retryParams.bottomMargin = dp(8);
         errorView.addView(retry, retryParams);
@@ -191,6 +219,10 @@ public class MainActivity extends Activity {
         settings.setText("App settings");
         settings.setOnClickListener(v -> showSettings(false));
         errorView.addView(settings);
+        Button updateWebView = new Button(this);
+        updateWebView.setText("Update Android WebView");
+        updateWebView.setOnClickListener(v -> openWebViewUpdate());
+        errorView.addView(updateWebView);
 
         root.addView(errorView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
@@ -211,20 +243,60 @@ public class MainActivity extends Activity {
     }
 
     private void loadServer() {
+        if (webView == null) { recreate(); return; }
         loadFailed = false;
+        startupReady = false;
         hideError();
+        startupView.setVisibility(View.VISIBLE);
         progress.setIndeterminate(true);
         progress.setVisibility(View.VISIBLE);
-        webView.setVisibility(View.INVISIBLE);
-        webView.loadUrl(Config.APP_ORIGIN + "/#home");
+        // An invisible WebView can delay rendering callbacks on some phones.
+        // Keep it mounted and visible; the native startup view covers it.
+        webView.setVisibility(View.VISIBLE);
+        webView.stopLoading();
+        startupHandler.removeCallbacks(startupTimeout);
+        startupHandler.postDelayed(startupTimeout, 15000);
+        String home = Config.APP_ORIGIN + "/#home";
+        if (home.equals(webView.getUrl())) webView.reload();
+        else webView.loadUrl(home);
+    }
+
+    private void interfaceReady() {
+        if (loadFailed || isFinishing() || isDestroyed() || webView == null) return;
+        startupReady = true;
+        startupHandler.removeCallbacks(startupTimeout);
+        startupView.setVisibility(View.GONE);
+        hideError();
+        progress.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
     }
 
     private void showError(String detail) {
         loadFailed = true;
-        errorDetail.setText(detail);
+        startupHandler.removeCallbacks(startupTimeout);
+        startupView.setVisibility(View.GONE);
+        String version = "Dinosour " + BuildConfig.VERSION_NAME;
+        if (Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.PackageInfo provider = WebView.getCurrentWebViewPackage();
+            if (provider != null) version += "\n" + provider.packageName + " " + provider.versionName;
+        }
+        errorDetail.setText(detail + "\n\n" + version);
         errorView.setVisibility(View.VISIBLE);
-        webView.setVisibility(View.INVISIBLE);
+        if (webView != null) webView.setVisibility(View.INVISIBLE);
         progress.setVisibility(View.GONE);
+    }
+
+    private void openWebViewUpdate() {
+        String providerName = "com.google.android.webview";
+        if (Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.PackageInfo provider = WebView.getCurrentWebViewPackage();
+            if (provider != null) providerName = provider.packageName;
+        }
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + providerName))); }
+        catch (Exception error) {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + providerName))); }
+            catch (Exception ignored) { toast("Update Android System WebView or Chrome in your app store."); }
+        }
     }
 
     private void hideError() {
@@ -466,12 +538,26 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            progress.setVisibility(View.GONE);
             if (!loadFailed) {
-                hideError();
                 webView.setVisibility(View.VISIBLE);
+                // Do not wait for thumbnails/network requests before revealing
+                // the app. appReady() normally arrives before onPageFinished.
+                view.evaluateJavascript("window.__dinosourReady === true", value -> {
+                    if ("true".equals(value)) interfaceReady();
+                });
                 if (url != null && url.startsWith(serverUrl + "/")) prefs.edit().putString(KEY_LAST_PAGE, url).apply();
             }
+        }
+
+        @Override
+        public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+            rendererGone = true;
+            chromeClient.hideCustomView();
+            root.removeView(view);
+            view.destroy();
+            if (webView == view) webView = null;
+            showError("Android stopped the page renderer. Tap Try again to reopen Dinosour.");
+            return true;
         }
 
         @Override
@@ -484,10 +570,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-            // 401 is the access-code page and 404 may be an app route. Let the
-            // WebView render those response bodies; only hide the app for a real
-            // server failure.
-            if (request.isForMainFrame() && response.getStatusCode() >= 500) {
+            if (request.isForMainFrame() && response.getStatusCode() >= 400) {
                 showError("Dinosour could not load this page. Try again.");
             }
         }
@@ -543,7 +626,7 @@ public class MainActivity extends Activity {
             customView = null;
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
-            webView.setVisibility(errorView.getVisibility() == View.VISIBLE ? View.INVISIBLE : View.VISIBLE);
+            if (webView != null) webView.setVisibility(errorView.getVisibility() == View.VISIBLE ? View.INVISIBLE : View.VISIBLE);
             if (customViewCallback != null) {
                 customViewCallback.onCustomViewHidden();
                 customViewCallback = null;
@@ -552,6 +635,20 @@ public class MainActivity extends Activity {
     }
 
     private class AndroidBridge {
+        @JavascriptInterface
+        public void appReady() {
+            runOnUiThread(() -> interfaceReady());
+        }
+
+        @JavascriptInterface
+        public void startupFailed(String message) {
+            final String detail = message == null ? "The interface could not start." : message.substring(0, Math.min(message.length(), 400));
+            runOnUiThread(() -> {
+                if (!startupReady && !isFinishing() && !isDestroyed())
+                    showError("The interface could not start. Try again or update Android System WebView.\n\n" + detail);
+            });
+        }
+
         @JavascriptInterface
         public void exportBackup(String data) {
             if (data.length() > 2 * 1024 * 1024) return;
@@ -655,6 +752,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        startupHandler.removeCallbacksAndMessages(null);
         if (engine != null) engine.close();
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
         if (downloadReceiver != null) unregisterReceiver(downloadReceiver);

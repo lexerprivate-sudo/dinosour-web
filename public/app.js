@@ -701,7 +701,6 @@ function movePlayer(layout, target) {
     }, 0);
   }
 }
-
 async function watch(id, current, controller, refresh) {
   const watchStarted = performance.now();
   playbackBusy = true; playbackBufferAhead = 0;
@@ -1837,3 +1836,6 @@ if (window.DinosourAndroid?.openSettings) {
     $('#share-app').setAttribute('aria-label', 'Share Dinosour');
   }
 }
+// Signal readiness after initialization, without waiting for live feed requests.
+window.__dinosourReady = true;
+window.DinosourAndroid?.appReady?.();

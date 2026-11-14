@@ -1,6 +1,6 @@
 {
-  "versionCode": 4,
-  "versionName": "1.1.0",
-  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.1.0/DinosourWeb.apk",
-  "notes": "Standalone Android: open and watch using Wi-Fi or mobile data. No PC, localhost address, tunnel, access code, or hosting account is needed. Includes the interface, Python, QuickJS and yt-dlp 2026.10.26, native backup/restore, and migration of existing library data. Install over the previous app to retain data. Android-device playback validation is still pending."
+  "versionCode": 5,
+  "versionName": "1.1.1",
+  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.1.1/DinosourWeb.apk",
+  "notes": "Standalone Android with startup recovery: visible opening screen, interface readiness independent of network loading, and retry/WebView update controls if startup fails. Includes on-phone playback without a PC, server address, or access code. Install over the previous app to retain your library. Physical Android validation is still pending."
 }
