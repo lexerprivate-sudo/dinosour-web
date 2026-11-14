@@ -568,6 +568,7 @@ const server = http.createServer(async (req, res) => {
       '/': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
       '/index.html': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
       '/app.js': ['app.js', 'text/javascript; charset=utf-8', 'no-cache'],
+      '/native.js': ['native.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/style.css': ['style.css', 'text/css; charset=utf-8', 'no-cache'],
       '/icon.svg': ['icon.svg', 'image/svg+xml', 'public, max-age=86400'],
       '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json; charset=utf-8', 'public, max-age=3600'],

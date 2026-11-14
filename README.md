@@ -1,5 +1,16 @@
 # Dinosour
 
+## Android: open and watch
+
+The **1.1.0 Android app is standalone**: install `DinosourWeb.apk`, open it,
+and watch using Wi-Fi or mobile data. No PC, server address, tunnel, invite code,
+hosting account, or YouTube account is required. The interface and playback
+engine are bundled in the APK. Only public, unrestricted recorded videos are
+supported.
+
+The desktop/browser version below still uses the local Node server. Android
+does not depend on it.
+
 A local YouTube-style web app with live search and direct playback of public
 YouTube videos. No app account, subscription system, or embedded ad player.
 
@@ -228,10 +239,11 @@ track fails, it requests fresh playback metadata automatically and resumes near 
 previous position; the full error screen only appears if the automatic recovery
 also fails. Shorts use the same fallback and refresh behavior inside the reel.
 
-Dinosour is an installable **web app/PWA** plus a signed **Android WebView
-shell**. The mobile layout is verified at 390×844 in Chrome. The APK is built,
-signed, and structurally verified, but it has not yet been installed on a
-physical Android device.
+Dinosour is an installable **web app/PWA** plus a standalone **Android app**.
+The Android interface runs in WebView with bundled assets; yt-dlp, Python, and
+QuickJS run on the phone. Native-device playback needs an Android smoke test;
+desktop browser tests exercise the same bundled JavaScript with a desktop
+implementation of its native transport.
 
 ## Android app and updates
 
@@ -272,54 +284,42 @@ Run `npm run test:watch-prefetch` for the deterministic buffering/resume test.
 It requires FFmpeg on PATH to generate small local media fixtures.
 `npm run test:playback-features` covers auto quality, language/caption controls,
 recovery, mini-player continuity, queue ordering/autoplay, and mobile layout.
-These are web-side changes: reopen the Android app to load them; no new APK is
-required.
+Android bundles these interface files, so Android updates now ship in the APK.
 
-A signed Android shell is included:
+A signed standalone Android build is included:
 
 - Download the latest APK:
   <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
 - Local copies: `C:\Users\Rave\Desktop\DinosourWeb.apk` and
-  `C:\Users\Rave\Desktop\DinosourWeb-1.0.2.apk`
+  `C:\Users\Rave\Desktop\DinosourWeb-1.1.0.apk`
 - Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.0.2`
-- Settings include **Test connection**, and the server address is saved in
-  SharedPreferences so it survives app updates. The address can be either the
-  same-Wi-Fi LAN URL or the public HTTPS link.
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.1.0`
+- Opens directly to Home. Settings contain app information and update checks,
+  with no server-address prompt.
 
 This app installs alongside the original Dinosour from the `tot` project.
 It has its own Android package and GitHub repository.
 
-The shell is a small WebView app. It opens the Dinosour server, so the interface
-and features update on the web without a new APK. The Android shell only needs
-rebuilding when native behavior changes.
-
-A static APK cannot contain this app by itself. Search, yt-dlp metadata, ticket
-handling, and the media proxy all need a running Node backend. GitHub Pages and
-other static hosts cannot run it. On your home Wi-Fi, the PC running this folder
-is the backend. To use the app away from home, host the Node process on a VPS
-(or a home server with a public HTTPS tunnel) and keep `yt-dlp` updated there.
+The APK serves the bundled interface from a virtual HTTPS origin inside WebView.
+Search and caption requests use native HTTPS networking; metadata uses the
+bundled yt-dlp Android runtime. Media comes directly from YouTube on the phone's
+own connection. No local listening port or remote application server is needed.
+The larger APK includes Python and QuickJS for ARM and x86 phones/emulators.
 
 ### Install on the phone
 
-1. On the PC, double-click **Start Dinosour (LAN).cmd**. Keep its window open. It
-   binds to `0.0.0.0` and prints the address(es) to use on the phone, for example
-   `http://192.168.1.59:3210`. Allow Node.js through the Windows firewall if
-   prompted. The address can change if you reconnect to Wi-Fi; the app's gear
-   settings let you correct it without reinstalling.
-2. Install `DinosourWeb.apk` from the [latest GitHub release](https://github.com/lexerprivate-sudo/dinosour-web/releases/latest)
+1. Install `DinosourWeb.apk` from the [latest GitHub release](https://github.com/lexerprivate-sudo/dinosour-web/releases/latest)
    or from the Desktop copy. Android will ask to allow installs from that app
    or source.
-3. Connect the phone to the same Wi-Fi, open Dinosour, and accept the prefilled
-   server address. If the PC's address changed, tap the **gear icon** in the top
-   bar, enter the address printed by the LAN script, and use **Test connection**.
-4. Away from home, start **Start Dinosour (Public).cmd** instead, enter the
-   printed public address in the gear settings, and tap **Test connection**. If
-   the app shows **Enter access code**, type the code once; the WebView keeps the
-   unlock cookie. The saved address survives app updates.
-5. The library, topics, and history are stored on the phone. The gear icon also
-   has **Check for updates**.
+2. Open the app while connected to Wi-Fi or mobile data.
+3. Search or tap a video. The first extraction initializes the bundled runtime.
+
+Install over the existing APK to preserve data. On upgrade, Dinosour attempts
+to copy its library and preferences from the previously saved WebView origin,
+without needing to contact that old server. Original origin storage is retained.
+Native storage also backs up subsequent library changes. Backup export/import
+uses Android's document picker.
 
 The gear icon appears only inside the Android shell; in a normal browser it stays
 hidden.
@@ -353,7 +353,8 @@ version code.
 
 ### Updates
 
-The app fetches `<server>/app-update.json` when you tap **Check for updates**.
+The app fetches this repository's `public/app-update.json` from GitHub when you
+tap **Check for updates**, independently of any PC or tunnel.
 `apkUrl` can be an absolute URL or a path relative to the server. The app
 downloads it with Android's DownloadManager and opens the system package
 installer. Android always asks for confirmation and requires **Install unknown
@@ -361,17 +362,17 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.0.2` release hosts
-`DinosourWeb.apk`, and `public/app-update.json` points `apkUrl` at the stable
-`/releases/latest/download/DinosourWeb.apk` URL, which always serves the newest
-release asset with that name.
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.1.0` release hosts
+`DinosourWeb.apk`. Update metadata uses the version-specific APK URL so an update
+check cannot accidentally download an older asset while a release is publishing.
+The `/releases/latest/download/DinosourWeb.apk` link remains the easy sharing URL.
 
 To publish a new Android version:
 
 1. Increase `versionCode` and `versionName` in `android/app/build.gradle`.
 2. Run `build-apk.cmd` to build and sign the APK.
-3. Set the same `versionCode`/`versionName` in `public/app-update.json`. Leave
-   `apkUrl` unchanged; the `latest/download` link follows new releases.
+3. Set the same `versionCode`/`versionName` in `public/app-update.json` and point
+   `apkUrl` to `/releases/download/vX.Y.Z/DinosourWeb.apk` on GitHub.
 4. Create a GitHub Release tagged `vX.Y.Z` and attach the built APK with the
    exact name `DinosourWeb.apk`.
 5. Commit and push the updated `public/app-update.json` so update checks report
@@ -383,7 +384,7 @@ Android app with its own updater. This project intentionally does not modify it.
 [Obtainium](https://github.com/ImranR98/Obtainium) is an alternative that watches
 GitHub Releases itself.
 
-### Hosting checklist
+### Optional browser hosting (not required by Android)
 
 1. Install Node.js 22+ and `yt-dlp` on the server, then copy this folder and run
    `npm install --omit=dev` if you only need runtime files.
@@ -402,7 +403,7 @@ GitHub Releases itself.
    does this by default.
 4. Confirm `https://your.domain/manifest.webmanifest`, `/sw.js`, and playback all
    work. Chrome should offer **Install Dinosour**.
-5. Enter the HTTPS address in the Android app's gear settings.
+5. Open the HTTPS address in a browser.
 
 ### Signing key
 
@@ -411,9 +412,10 @@ The APK is signed with `android/keystore/dinosour-release.jks` and
 APK installed over this one must use the same key, so losing the keystore means
 users must uninstall and reinstall.
 
-The included shell is a WebView app. A Trusted Web Activity (Bubblewrap) or
-Capacitor app are alternatives if you later want Chrome-backed rendering or
-native plugins; both still require the hosted backend.
+The Android build uses youtubedl-android 0.18.1 (GPL-3.0). See
+`android/THIRD_PARTY_NOTICES.md` for upstream source and runtime notices.
+Gradle downloads and verifies the pinned yt-dlp 2026.10.26 executable at build
+time; the installed APK includes it, Python, and QuickJS.
 
 ## Studying YouTube
 
@@ -459,6 +461,13 @@ npm run test:features
 npm run test:browser
 npm run test:pwa
 ```
+
+For the standalone adapter, build the APK first, then run `npm run test:native`.
+This test needs Python 3.11+, Node, Chrome, and internet access. It loads the
+bundled UI at its virtual Android origin, uses the exact packaged yt-dlp through
+a desktop implementation of the native boundary, and checks live search, direct
+media playback, storage backup, and absence of PC/tunnel requests. It does not
+replace testing the Android native executables on a physical device.
 
 `npm test` also checks the PWA manifest, icon dimensions and MIME types, the
 uncached service worker, `viewport-fit=cover`, and the safe-area CSS.

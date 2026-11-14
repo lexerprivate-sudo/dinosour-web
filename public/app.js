@@ -503,6 +503,24 @@ async function loadShareDialog() {
   }
 }
 function openShareDialog() {
+  if (window.__dinosourStandalone) {
+    let dialog = $('#share-native-dialog');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'share-native-dialog';
+      dialog.className = 'share-dialog';
+      const link = 'https://github.com/lexerprivate-sudo/dinosour-web/releases/latest/download/DinosourWeb.apk';
+      dialog.innerHTML = `<div class="dialog-heading"><h2>Share Dinosour</h2><button type="button" data-close aria-label="Close">×</button></div><p>Send the Android app to a friend. It works directly on Wi-Fi or mobile data, with no computer or access code.</p><div class="share-input"><input readonly aria-label="App download link" value="${link}"><button type="button" data-copy>Copy</button></div>`;
+      document.body.append(dialog);
+      dialog.querySelector('[data-close]').onclick = () => dialog.close();
+      dialog.querySelector('[data-copy]').onclick = async () => {
+        try { await navigator.clipboard.writeText(link); toast('App link copied'); }
+        catch { dialog.querySelector('input').select(); toast('Select and copy the app link.'); }
+      };
+    }
+    dialog.showModal();
+    return;
+  }
   let dialog = $('#share-dialog');
   if (!dialog) {
     dialog = document.createElement('dialog');
@@ -615,6 +633,11 @@ function openBackupDialog() {
     document.body.append(dialog);
     dialog.querySelector('[data-close-backup]').onclick = () => dialog.close();
     dialog.querySelector('[data-export-backup]').onclick = () => {
+      if (window.DinosourAndroid?.exportBackup) {
+        window.DinosourAndroid.exportBackup(JSON.stringify(backupPayload(), null, 2));
+        dialog.querySelector('#backup-summary').textContent = 'Choose where to save your backup.';
+        return;
+      }
       const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: 'application/json' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
@@ -1802,11 +1825,15 @@ document.addEventListener('keydown', event => {
 window.addEventListener('hashchange', route);
 window.addEventListener('pagehide', () => { cleanup(); if (miniSession?.detached) miniSession.cleanup(); });
 route();
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+if (!window.__dinosourStandalone && 'serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 if (window.DinosourAndroid?.openSettings) {
   const androidSettings = $('#android-settings');
   androidSettings.hidden = false;
   androidSettings.onclick = () => window.DinosourAndroid.openSettings();
+  if (window.__dinosourStandalone) {
+    $('#share-app').title = 'Share Dinosour';
+    $('#share-app').setAttribute('aria-label', 'Share Dinosour');
+  }
 }

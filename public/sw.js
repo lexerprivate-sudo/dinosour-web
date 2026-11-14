@@ -1,8 +1,8 @@
 // Dinosour service worker: network-first so a deployed update is picked up as
 // soon as the device is online, with a cached shell as the offline fallback.
 // API, media ranges and cross-origin requests always go straight to the network.
-const CACHE = 'dinosour-shell-v1';
-const SHELL = ['/', '/app.js', '/style.css', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'dinosour-shell-v2';
+const SHELL = ['/', '/native.js', '/app.js', '/style.css', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

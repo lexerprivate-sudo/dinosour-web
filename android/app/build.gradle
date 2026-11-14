@@ -16,8 +16,11 @@ android {
         applicationId 'com.dinosour.web'
         minSdk 24
         targetSdk 34
-        versionCode 3
-        versionName '1.0.2'
+        versionCode 4
+        versionName '1.1.0'
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
+        }
     }
 
     signingConfigs {
@@ -43,8 +46,62 @@ android {
         buildConfig true
     }
 
+    packagingOptions {
+        jniLibs { useLegacyPackaging true }
+        resources { excludes += ['META-INF/DEPENDENCIES', 'META-INF/INDEX.LIST'] }
+    }
+
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/webAssets')
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
+}
+
+// Bundle the same interface used on desktop. Android serves these assets
+// itself and resolves public YouTube requests on the phone.
+tasks.register('bundleWebAssets', Sync) {
+    dependsOn 'downloadPlaybackEngine'
+    into layout.buildDirectory.dir('generated/webAssets')
+    from('../../public') {
+        exclude 'download/**', 'sw.js', 'app-update.json'
+    }
+    from('../..') {
+        include 'youtube-search.js', 'audio-formats.js'
+        into 'native'
+    }
+    from(layout.buildDirectory.dir('playbackEngine')) { into 'engine' }
+    from('..') {
+        include 'COPYING', 'THIRD_PARTY_NOTICES.md'
+        into 'licenses'
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'bundleWebAssets' }
+
+// Pin the official zipimport runtime rather than shipping the older copy from
+// the Android wrapper. Build-time download; no setup download on the phone.
+tasks.register('downloadPlaybackEngine') {
+    def version = '2026.10.26'
+    def checksum = 'e51e69e89489f199530f13d32a4342da3ddb2cf34842f364603a066db05afbf3'
+    def target = layout.buildDirectory.file('playbackEngine/yt-dlp')
+    inputs.property('version', version)
+    inputs.property('sha256', checksum)
+    outputs.file(target)
+    doLast {
+        def file = target.get().asFile
+        file.parentFile.mkdirs()
+        def digest = { byte[] bytes -> java.security.MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString() }
+        if (file.exists() && digest(file.bytes) == checksum) return
+        def connection = new URL("https://github.com/yt-dlp/yt-dlp/releases/download/${version}/yt-dlp").openConnection()
+        connection.connectTimeout = 20000
+        connection.readTimeout = 60000
+        def bytes = connection.inputStream.withCloseable { it.bytes }
+        if (digest(bytes) != checksum) throw new GradleException('Playback engine checksum mismatch.')
+        file.bytes = bytes
     }
 }

@@ -44,6 +44,7 @@ import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -67,16 +68,27 @@ public class MainActivity extends Activity {
     private boolean loadFailed;
     private long updateDownloadId = -1;
     private BroadcastReceiver downloadReceiver;
+    private NativeEngine engine;
+    private android.webkit.ValueCallback<Uri[]> fileCallback;
+    private String pendingBackup;
+    private static final int OPEN_BACKUP = 501, SAVE_BACKUP = 502;
+    private static final String[] STORAGE_KEYS = {"dinosour.library.v1", "dinosour.ui.v1"};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        serverUrl = prefs.getString(KEY_SERVER, null);
+        String previousServer = prefs.getString(KEY_SERVER, null);
+        serverUrl = Config.APP_ORIGIN;
         setupWindow();
         buildLayout();
+        engine = new NativeEngine(this, (id, payload) -> runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed())
+                webView.evaluateJavascript("window.__dinosourNativeResult && window.__dinosourNativeResult(" +
+                        JSONObject.quote(id) + "," + payload.toString() + ");", null);
+        }));
         registerDownloadReceiver();
-        if (serverUrl == null) showSettings(true);
+        migrateStorage(previousServer);
     }
 
     private void setupWindow() {
@@ -100,6 +112,7 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.INVISIBLE);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
+        settings.setUserAgentString(NativeEngine.USER_AGENT);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
@@ -109,7 +122,7 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setAllowFileAccess(false);
-        settings.setAllowContentAccess(false);
+        settings.setAllowContentAccess(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setSupportMultipleWindows(false);
         settings.setGeolocationEnabled(false);
@@ -160,7 +173,7 @@ public class MainActivity extends Activity {
         errorView.addView(errorDetail);
 
         TextView hint = new TextView(this);
-        hint.setText("At home, start \"Start Dinosour (LAN).cmd\" and use the address shown in its window. Away from home, start \"Start Dinosour (Public).cmd\" and use the Public link it prints. This address is saved and survives app updates.");
+        hint.setText("Dinosour runs on this phone. Connect to Wi-Fi or mobile data, then try again.");
         hint.setTextColor(Color.rgb(170, 170, 170));
         hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
@@ -175,7 +188,7 @@ public class MainActivity extends Activity {
         errorView.addView(retry, retryParams);
 
         Button settings = new Button(this);
-        settings.setText("Change server address");
+        settings.setText("App settings");
         settings.setOnClickListener(v -> showSettings(false));
         errorView.addView(settings);
 
@@ -198,18 +211,12 @@ public class MainActivity extends Activity {
     }
 
     private void loadServer() {
-        if (serverUrl == null) {
-            showSettings(true);
-            return;
-        }
         loadFailed = false;
         hideError();
         progress.setIndeterminate(true);
         progress.setVisibility(View.VISIBLE);
         webView.setVisibility(View.INVISIBLE);
-        String lastPage = prefs.getString(KEY_LAST_PAGE, null);
-        String target = lastPage != null && lastPage.startsWith(serverUrl + "/") ? lastPage : serverUrl + "/#home";
-        webView.loadUrl(target);
+        webView.loadUrl(Config.APP_ORIGIN + "/#home");
     }
 
     private void showError(String detail) {
@@ -225,75 +232,53 @@ public class MainActivity extends Activity {
     }
 
     private void showSettings(boolean firstRun) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(24), dp(8), dp(24), 0);
+        new AlertDialog.Builder(this)
+                .setTitle("Dinosour " + BuildConfig.VERSION_NAME)
+                .setMessage("Playback runs on this phone using Wi-Fi or mobile data.\n\nNo computer, server address, access code, or account is needed.\n\nYour saved videos, topics, and history stay on this device.")
+                .setPositiveButton("Done", null)
+                .setNeutralButton("Check for updates", (d, w) -> checkForUpdates(Config.UPDATE_ORIGIN))
+                .show();
+    }
 
-        TextView label = new TextView(this);
-        label.setText("Server address");
-        label.setTextSize(14);
-        box.addView(label);
-
-        EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("http://192.168.1.10:3210 or https://…");
-        input.setText(serverUrl != null ? serverUrl : Config.DEFAULT_SERVER);
-        input.setSelectAllOnFocus(true);
-        box.addView(input);
-
-        TextView hint = new TextView(this);
-        hint.setText("Use your computer's Wi-Fi address (for example http://10.0.0.5:3210) or the Public link from Start Dinosour (Public).cmd. The address is saved on this device and survives app updates.");
-        hint.setTextSize(12);
-        hint.setTextColor(Color.rgb(110, 110, 110));
-        hint.setPadding(0, dp(8), 0, dp(10));
-        box.addView(hint);
-
-        Button test = new Button(this);
-        test.setText("Test connection");
-        test.setOnClickListener(v -> testServer(input.getText().toString()));
-        box.addView(test);
-
-        TextView version = new TextView(this);
-        version.setText("Android shell " + BuildConfig.VERSION_NAME);
-        version.setTextSize(12);
-        version.setTextColor(Color.rgb(150, 150, 150));
-        version.setPadding(0, 0, 0, dp(8));
-        box.addView(version);
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(firstRun ? "Connect to Dinosour" : "App settings")
-                .setView(box)
-                .setPositiveButton("Save", null)
-                .setNegativeButton(firstRun ? "Exit" : "Cancel", null)
-                .setNeutralButton("Check for updates", null)
-                .create();
-        dialog.setCancelable(!firstRun);
-        dialog.setOnCancelListener(d -> {
-            if (firstRun) finish();
-        });
-        dialog.show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String value = normalizeServer(input.getText().toString());
-            if (value == null) {
-                input.setError("Enter an address such as http://192.168.1.10:3210");
-                return;
-            }
-            String previous = serverUrl;
-            serverUrl = value;
-            SharedPreferences.Editor editor = prefs.edit().putString(KEY_SERVER, value);
-            if (!value.equals(previous)) editor.remove(KEY_LAST_PAGE);
-            editor.apply();
-            dialog.dismiss();
+    // loadDataWithBaseURL restores the old origin without contacting the old
+    // computer/tunnel. Read only our two keys; keep the original storage intact.
+    private void migrateStorage(String previousServer) {
+        if (prefs.getBoolean("standalone_migrated", false) || previousServer == null ||
+                Config.APP_ORIGIN.equals(previousServer)) {
             loadServer();
+            return;
+        }
+        String normalized = normalizeServer(previousServer);
+        if (normalized == null) { loadServer(); return; }
+        Uri uri = Uri.parse(normalized);
+        String origin = uri.getScheme() + "://" + uri.getAuthority() + "/";
+        WebView legacy = new WebView(this);
+        legacy.getSettings().setJavaScriptEnabled(true);
+        legacy.getSettings().setDomStorageEnabled(true);
+        java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable finish = () -> {
+            if (!finished.compareAndSet(false, true)) return;
+            legacy.destroy();
+            if (!isFinishing() && !isDestroyed()) loadServer();
+        };
+        legacy.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                view.evaluateJavascript("(function(){var v={};['dinosour.library.v1','dinosour.ui.v1'].forEach(function(k){v[k]=localStorage.getItem(k)});return v})()", value -> {
+                    if (finished.get()) return;
+                    try {
+                        JSONObject old = new JSONObject(value);
+                        SharedPreferences.Editor editor = prefs.edit();
+                        for (String key : STORAGE_KEYS) {
+                            if (!old.isNull(key) && !prefs.contains("web." + key)) editor.putString("web." + key, old.getString(key));
+                        }
+                        editor.putBoolean("standalone_migrated", true).apply();
+                    } catch (Exception ignored) { }
+                    finish.run();
+                });
+            }
         });
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-            String value = normalizeServer(input.getText().toString());
-            checkForUpdates(value != null ? value : serverUrl);
-        });
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
-            dialog.dismiss();
-            if (firstRun) finish();
-        });
+        legacy.loadDataWithBaseURL(origin, "<!doctype html><title>Restore library</title>", "text/html", "UTF-8", null);
+        new android.os.Handler(getMainLooper()).postDelayed(finish, 2500);
     }
 
     private void testServer(String input) {
@@ -443,10 +428,30 @@ public class MainActivity extends Activity {
 
     private class DinosourClient extends WebViewClient {
         @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            Uri uri = request.getUrl();
+            if (!"https".equals(uri.getScheme()) || !"appassets.androidplatform.net".equals(uri.getHost())) return null;
+            String path = uri.getPath();
+            if (path == null || path.contains("..") || path.contains("\\")) return NativeEngine.empty(404);
+            if (path.startsWith("/api/thumb/")) return engine.thumbnail(path.substring("/api/thumb/".length()), "short".equals(uri.getQueryParameter("t")));
+            String asset = path.equals("/") ? "index.html" : path.substring(1);
+            String mime = asset.endsWith(".html") ? "text/html" :
+                    asset.endsWith(".js") ? "text/javascript" : asset.endsWith(".css") ? "text/css" :
+                    asset.endsWith(".svg") ? "image/svg+xml" : asset.endsWith(".png") ? "image/png" :
+                    asset.endsWith(".json") || asset.endsWith(".webmanifest") ? "application/json" : "text/plain";
+            try {
+                java.util.Map<String, String> headers = new java.util.HashMap<>();
+                headers.put("Cache-Control", "no-cache");
+                headers.put("X-Content-Type-Options", "nosniff");
+                return new WebResourceResponse(mime, mime.startsWith("image/") ? null : "UTF-8",
+                        200, "OK", headers, getAssets().open(asset));
+            } catch (Exception error) { return NativeEngine.empty(404); }
+        }
+
+        @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
-            String scheme = uri.getScheme();
-            if ("http".equals(scheme) || "https".equals(scheme)) return false;
+            if ("https".equals(uri.getScheme()) && "appassets.androidplatform.net".equals(uri.getHost())) return false;
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
             } catch (Exception ignored) {
@@ -473,7 +478,7 @@ public class MainActivity extends Activity {
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request.isForMainFrame()) {
                 String description = error.getDescription() == null ? "" : error.getDescription().toString();
-                showError("Could not connect to " + serverUrl + ".\n" + description + "\n\nMake sure the Dinosour server is running and the address in Settings matches the LAN address or the Public link shown on the computer.");
+                showError("Could not open Dinosour.\n" + description + "\n\nTry reopening the app.");
             }
         }
 
@@ -483,7 +488,7 @@ public class MainActivity extends Activity {
             // WebView render those response bodies; only hide the app for a real
             // server failure.
             if (request.isForMainFrame() && response.getStatusCode() >= 500) {
-                showError("The server answered with HTTP " + response.getStatusCode() + ".\n" + serverUrl);
+                showError("Dinosour could not load this page. Try again.");
             }
         }
     }
@@ -491,6 +496,18 @@ public class MainActivity extends Activity {
     private class DinosourChromeClient extends WebChromeClient {
         private View customView;
         private CustomViewCallback customViewCallback;
+
+        @Override
+        public boolean onShowFileChooser(WebView view, android.webkit.ValueCallback<Uri[]> callback, FileChooserParams params) {
+            if (fileCallback != null) fileCallback.onReceiveValue(null);
+            fileCallback = callback;
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            try { startActivityForResult(intent, OPEN_BACKUP); }
+            catch (Exception error) { fileCallback.onReceiveValue(null); fileCallback = null; toast("No file picker is available."); }
+            return true;
+        }
 
         @Override
         public void onProgressChanged(WebView view, int newProgress) {
@@ -536,18 +553,78 @@ public class MainActivity extends Activity {
 
     private class AndroidBridge {
         @JavascriptInterface
+        public void exportBackup(String data) {
+            if (data.length() > 2 * 1024 * 1024) return;
+            runOnUiThread(() -> {
+                pendingBackup = data;
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("application/json");
+                intent.putExtra(Intent.EXTRA_TITLE, "dinosour-backup.json");
+                try { startActivityForResult(intent, SAVE_BACKUP); }
+                catch (Exception error) { pendingBackup = null; toast("Could not open the file picker."); }
+            });
+        }
+        @JavascriptInterface
+        public void nativeRequest(String id, String kind, String payload) {
+            if (engine != null) engine.request(id, kind, payload);
+        }
+
+        @JavascriptInterface
+        public void cancelRequest(String id) {
+            if (engine != null) engine.cancel(id);
+        }
+
+        @JavascriptInterface
+        public String readStorage() {
+            JSONObject result = new JSONObject();
+            try {
+                for (String key : STORAGE_KEYS) if (prefs.contains("web." + key)) result.put(key, prefs.getString("web." + key, ""));
+            } catch (Exception ignored) { }
+            return result.toString();
+        }
+
+        @JavascriptInterface
+        public void saveStorage(String key, String value) {
+            if (!java.util.Arrays.asList(STORAGE_KEYS).contains(key) || value.length() > 2 * 1024 * 1024) return;
+            if (value.isEmpty()) prefs.edit().remove("web." + key).apply();
+            else prefs.edit().putString("web." + key, value).apply();
+        }
+
+        @JavascriptInterface
         public void openSettings() {
             runOnUiThread(() -> showSettings(false));
         }
 
         @JavascriptInterface
         public void checkForUpdates() {
-            runOnUiThread(() -> MainActivity.this.checkForUpdates(serverUrl));
+            runOnUiThread(() -> MainActivity.this.checkForUpdates(Config.UPDATE_ORIGIN));
         }
 
         @JavascriptInterface
         public String versionName() {
             return BuildConfig.VERSION_NAME;
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == OPEN_BACKUP && fileCallback != null) {
+            fileCallback.onReceiveValue(resultCode == RESULT_OK && data != null && data.getData() != null ? new Uri[]{data.getData()} : null);
+            fileCallback = null;
+        } else if (requestCode == SAVE_BACKUP) {
+            String backup = pendingBackup;
+            pendingBackup = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null || backup == null) return;
+            Uri destination = data.getData();
+            new Thread(() -> {
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(destination)) {
+                    if (out == null) throw new java.io.IOException("No destination");
+                    out.write(backup.getBytes(StandardCharsets.UTF_8));
+                    runOnUiThread(() -> toast("Backup saved."));
+                } catch (Exception error) { runOnUiThread(() -> toast("Could not save the backup.")); }
+            }).start();
         }
     }
 
@@ -578,6 +655,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (engine != null) engine.close();
+        if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
         if (downloadReceiver != null) unregisterReceiver(downloadReceiver);
         if (webView != null) {
             root.removeView(webView);

@@ -10,7 +10,7 @@
     "share": "node share.mjs",
     "share:stable": "node share.mjs --provider=tailscale",
     "share:rotate": "node share.mjs --rotate-code",
-    "check": "node --check server.js && node --check youtube-search.js && node --check public/app.js && node --check public/sw.js",
+    "check": "node --check server.js && node --check youtube-search.js && node --check public/app.js && node --check public/native.js && node --check public/native-api.js && node --check public/sw.js",
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser.mjs",
     "test:pwa": "node tests/pwa-browser.mjs",
@@ -21,6 +21,7 @@
     "test:watch-prefetch": "node tests/watch-prefetch.mjs",
     "test:playback-features": "node tests/playback-features.mjs",
     "test:features": "node tests/features.mjs",
+    "test:native": "node tests/native.mjs",
     "build:android": "cd android && gradlew.bat assembleRelease"
   },
   "engines": {

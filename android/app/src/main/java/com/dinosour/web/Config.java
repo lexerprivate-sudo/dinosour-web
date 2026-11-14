@@ -1,11 +1,10 @@
 package com.dinosour.web;
 
 final class Config {
-    // Prefilled in the first-run dialog. Change it in the app's settings if the
-    // computer's Wi-Fi address changes. The app also accepts the public HTTPS
-    // link printed by Start Dinosour (Public).cmd; the saved address survives
-    // app updates.
-    static final String DEFAULT_SERVER = "http://192.168.1.59:3210";
+    // Virtual HTTPS origin served entirely from the installed APK.
+    static final String APP_ORIGIN = "https://appassets.androidplatform.net";
+    static final String UPDATE_ORIGIN = "https://raw.githubusercontent.com/lexerprivate-sudo/dinosour-web/main/public";
+    static final String ENGINE_VERSION = "2026.10.26";
 
     private Config() {
     }
