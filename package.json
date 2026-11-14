@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "desktop/main.cjs",
+  "author": "Dinosour",
   "description": "A local, account-free YouTube viewer",
   "scripts": {
     "start": "node server.js --open",
@@ -23,12 +25,18 @@
     "test:features": "node tests/features.mjs",
     "test:native": "node tests/native.mjs",
     "test:startup": "node tests/startup.mjs",
-    "build:android": "cd android && gradlew.bat assembleRelease"
+    "build:android": "cd android && gradlew.bat assembleRelease",
+    "desktop": "electron .",
+    "prepare:desktop": "node desktop/prepare.mjs",
+    "build:desktop": "npm run prepare:desktop && electron-builder --config electron-builder.json --win --x64",
+    "test:desktop": "node tests/desktop.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0"
+    "@playwright/test": "^1.65.0",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0"
   }
 }

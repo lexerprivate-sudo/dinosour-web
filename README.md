@@ -1,5 +1,25 @@
 # Dinosour
 
+## Windows desktop app
+
+Download [Dinosour Web Desktop 1.0.0](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.0.0/DinosourWeb-Setup-1.0.0.exe)
+and run the installer. Supports Windows 10/11 x64. Open **Dinosour Web** from
+the desktop or Start menu. Node, Chromium and yt-dlp are bundled; no terminal
+or separate runtime installation is needed. Internet access is required.
+
+The app starts its own loopback-only service and closes it on exit. Its fixed
+local origin preserves saved videos, topics, settings and history across app
+upgrades. Browser/Android libraries can be transferred using Settings backup
+export/import. Desktop updates are separate from Android releases.
+
+The installer is unsigned. Windows may display an unknown-publisher warning.
+The download is approximately 145 MB. Source and third-party notices are included
+in the release/tag; see `desktop/THIRD_PARTY_NOTICES.md`.
+
+Build locally: `npm ci`, `npm run build:desktop`. Output:
+`dist/DinosourWeb-Setup-1.0.0.exe`. Test the packaged app using
+`npm run test:desktop` (live internet required). Tests use an isolated profile.
+
 ## Android: open and watch
 
 The **1.1.1 Android app is standalone**: install `DinosourWeb.apk`, open it,
@@ -8,8 +28,9 @@ hosting account, or YouTube account is required. The interface and playback
 engine are bundled in the APK. Only public, unrestricted recorded videos are
 supported.
 
-The desktop/browser version below still uses the local Node server. Android
-does not depend on it.
+The Windows app manages its bundled local service automatically. The browser
+development version below uses a manually started Node server. Android does not
+depend on either.
 
 A local YouTube-style web app with live search and direct playback of public
 YouTube videos. No app account, subscription system, or embedded ad player.

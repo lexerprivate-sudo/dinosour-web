@@ -192,7 +192,7 @@ function extract(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.env.YTDLP_PATH || 'yt-dlp', [
       '--ignore-config', '--no-warnings', '--no-playlist', '--socket-timeout', '12', '--retries', '1', '--extractor-retries', '1',
-      '--js-runtimes', 'node', '--remote-components', 'ejs:github', ...args,
+      '--js-runtimes', process.env.YTDLP_JS_RUNTIME || 'node', '--remote-components', 'ejs:github', ...args,
     ], { windowsHide: true, shell: false });
     let output = '', errors = '', done = false;
     const finish = (error, data) => {
@@ -618,6 +618,7 @@ mediaServer.listen(mediaPort, host, () => {
 server.listen(port, host, async () => {
   const shownHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   console.log(`Dinosour is ready: http://${shownHost}:${port}`);
+  if (process.send) process.send({ type: 'ready', url: `http://${shownHost}:${port}` });
   if (host === '0.0.0.0' || host === '::') {
     for (const address of lanAddresses()) console.log(`On your phone (same Wi-Fi): ${address}`);
   }
