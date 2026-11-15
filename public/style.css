@@ -293,8 +293,11 @@ main:focus { outline: 0; }
 .watch-loading > img { width: 100%; height: 100%; object-fit: contain; opacity: .7; animation: watch-kenburns 16s ease-in-out infinite alternate; }
 @keyframes watch-kenburns { from { transform: scale(1.02); } to { transform: scale(1.12) translate(1.5%, -1.5%); } }
 .watch-loading-caption { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; background: linear-gradient(transparent 55%, #000c), radial-gradient(ellipse at center, #0000002e 0%, transparent 70%); text-shadow: 0 1px 4px #000; }
-.watch-loading-caption .spinner { width: 56px; height: 56px; border-width: 4px; }
-.watch-loading-caption .spinner::after { inset: -4px; border-width: 4px; filter: drop-shadow(0 0 10px #ffffff40); }
+.watch-loading-caption .watch-progress { width: 64px; height: 64px; filter: drop-shadow(0 0 10px #ffffff30); transform: rotate(-90deg); }
+.watch-progress-track, .watch-progress-fill { fill: none; stroke-width: 4; stroke-linecap: round; }
+.watch-progress-track { stroke: #ffffff26; }
+.watch-progress-fill { stroke: #fff; stroke-dasharray: 214; stroke-dashoffset: 214; transition: stroke-dashoffset .25s linear; will-change: stroke-dashoffset; }
+.watch-progress-pct { fill: #fff; font: 600 14px Roboto, Arial, sans-serif; dominant-baseline: central; }
 .watch-loading-caption > strong, .watch-loading-caption > span:last-child { animation: caption-rise .7s cubic-bezier(.2,.7,.3,1) both; }
 .watch-loading-caption > span:last-child { animation-delay: .12s; }
 @keyframes caption-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }

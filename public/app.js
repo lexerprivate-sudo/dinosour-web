@@ -18,7 +18,7 @@ let preferences = {};
 let playbackBusy = false, playbackBufferAhead = Infinity, miniSession = null;
 const isMetered = () => Boolean(navigator.connection?.saveData) || ['slow-2g', '2g'].includes(navigator.connection?.effectiveType || '');
 function allowPrefetch() {
-  return !playbackBusy && playbackBufferAhead >= 8 && !isMetered();
+  return !playbackBusy && playbackBufferAhead >= 3 && !isMetered();
 }
 try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')); } catch { preferences = null; }
 if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) preferences = {};
@@ -415,10 +415,15 @@ function discardWarmWatch() {
   }
   warmWatch = null;
 }
+// Only drop the warmed entry if the next route is for a different video, the
+// entry expired, or loading failed. A healthy playback sequence must keep it.
+function maybeKeepWarmWatch(nextId) {
+  if (warmWatch && warmWatch.id !== nextId) discardWarmWatch();
+}
 function prepareWatch(id) {
   if (!allowPrefetch()) return;
   if (warmWatch?.id === id || location.hash === `#watch=${id}`) return;
-  discardWarmWatch();
+  maybeKeepWarmWatch(id);
   const entry = { id, controller: new AbortController(), video: document.createElement('video'), audio: document.createElement('audio') };
   warmWatch = entry;
   entry.video.preload = entry.audio.preload = 'auto';
@@ -432,7 +437,7 @@ function prepareWatch(id) {
     return info;
   });
   entry.promise.catch(() => { if (warmWatch === entry) discardWarmWatch(); });
-  entry.expiry = setTimeout(() => { if (warmWatch === entry) discardWarmWatch(); }, 45000);
+  entry.expiry = setTimeout(() => { if (warmWatch === entry) discardWarmWatch(); }, 180000);
 }
 for (const event of ['pointerover', 'focusin', 'pointerdown']) {
   main.addEventListener(event, e => {
@@ -761,7 +766,7 @@ async function watch(id, current, controller, refresh) {
   const loading = document.createElement('div');
   loading.className = 'watch-loading';
   loading.setAttribute('role', 'status');
-  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><span class="spinner" aria-hidden="true"></span><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
+  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><svg class="watch-progress" viewBox="0 0 80 80" role="progressbar" aria-label="Buffering" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><circle class="watch-progress-track" cx="40" cy="40" r="34"/><circle class="watch-progress-fill" cx="40" cy="40" r="34"/><text class="watch-progress-pct" x="40" y="46" text-anchor="middle">0</text></svg><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
   video.parentElement.append(loading);
   const bufferHint = document.createElement('div');
   bufferHint.className = 'watch-buffer-hint'; bufferHint.hidden = true;
@@ -781,8 +786,23 @@ async function watch(id, current, controller, refresh) {
   const hideLoading = () => {
     hasFrame = true; loading.hidden = true; video.controls = true;
     frozenFrame.hidden = true;
+    clearInterval(bufferTimer);
     clearTimeout(waitingTimer); bufferHint.hidden = true;
   };
+  const bufferFill = () => {
+    const fill = loading.querySelector('.watch-progress-fill');
+    const pct = loading.querySelector('.watch-progress-pct');
+    const ring = loading.querySelector('.watch-progress');
+    if (!fill) return;
+    let buffered = 0;
+    try { if (video.buffered && video.buffered.length) buffered = video.buffered.end(video.buffered.length - 1) - video.currentTime; } catch {}
+    const fraction = Math.max(0, Math.min(1, buffered / 45)); // 45 s ahead is plenty
+    const circumference = 2 * Math.PI * 34;
+    fill.style.strokeDashoffset = String(circumference * (1 - fraction));
+    if (pct) pct.textContent = String(Math.round(fraction * 100) + '%');
+    if (ring) ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+  };
+  const bufferTimer = setInterval(bufferFill, 200);
   const showBuffering = () => {
     clearTimeout(waitingTimer);
     if (hasFrame) waitingTimer = setTimeout(() => {
@@ -846,7 +866,7 @@ async function watch(id, current, controller, refresh) {
   cleanup = () => {
     saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer); clearTimeout(stallTimer);
     document.removeEventListener('visibilitychange', onVisibility);
-    clearInterval(statsTimer); $('#stats-dialog')?.remove();
+    clearInterval(statsTimer); clearInterval(bufferTimer); $('#stats-dialog')?.remove();
     playbackBusy = false; playbackBufferAhead = Infinity;
     captionRequest++; if (captionBlob) URL.revokeObjectURL(captionBlob);
     warmed?.controller.abort();
@@ -920,6 +940,7 @@ async function watch(id, current, controller, refresh) {
       $('#captions').innerHTML = '<option value="">Off</option>' + (info.captions || []).map(t => `<option value="${escape(t.language)}">${escape(t.label)}</option>`).join('');
       $('#captions').value = (info.captions || []).some(t => t.language === preferences.captions) ? preferences.captions : '';
       $('#captions').disabled = !(info.captions || []).length;
+      $('#captions').closest('label')?.toggleAttribute('hidden', !(info.captions || []).length);
     };
     const setCaptions = async () => {
       const request = ++captionRequest;
@@ -939,7 +960,12 @@ async function watch(id, current, controller, refresh) {
         track.src = captionBlob;
         video.append(track); track.track.mode = 'showing';
       } catch (error) {
-        if (!disposed && request === captionRequest && error.name !== 'AbortError') { toast(error.message); $('#captions').value = ''; }
+        if (!disposed && request === captionRequest && error.name !== 'AbortError') {
+        toast(error.message);
+        $('#captions').value = '';
+        preferences.captions = '';
+        savePreferences();
+      }
       }
     };
     updateTracks(); setCaptions();
@@ -1026,6 +1052,9 @@ async function watch(id, current, controller, refresh) {
     statsDialog.addEventListener('close', () => clearInterval(statsTimer));
     const syncAudio = () => {
       if (!separate || disposed) return;
+      // When the background hold hides the app and pauses the video track,
+      // let audio run free — do not rewind to the frozen video clock.
+      if (backgroundAudioHold) { audio.playbackRate = video.playbackRate; audio.volume = video.volume; audio.muted = video.muted; return; }
       if (Math.abs(audio.currentTime - video.currentTime) > .35 && audio.readyState) audio.currentTime = video.currentTime;
       audio.playbackRate = video.playbackRate; audio.volume = video.volume; audio.muted = video.muted;
     };
@@ -1106,7 +1135,7 @@ async function watch(id, current, controller, refresh) {
       freezeFrame(); switching = true; playingIntent = autoplay;
       audioBuffering = false; clearTimeout(stallTimer);
       selectedQuality = index; lastQualityChange = Date.now(); updateAutoLabel();
-      playbackBusy = true; playbackBufferAhead = 0; discardWarmWatch();
+      playbackBusy = true; playbackBufferAhead = 0;
       if (!video.paused) ignorePause = true;
       video.pause(); audio.pause(); separate = selected.separateAudio;
       audioIndex = 0;
@@ -1152,7 +1181,7 @@ async function watch(id, current, controller, refresh) {
     audio.onplaying = () => { $('#unmute')?.remove(); };
     audio.onwaiting = () => {
       if (!separate || disposed || retrying || switching || video.paused || video.seeking) return;
-      audioBuffering = true; playbackBusy = true; discardWarmWatch();
+      audioBuffering = true; playbackBusy = true;
       if (!video.paused) ignorePause = true;
       video.pause(); audio.pause();
       bufferHint.textContent = 'Buffering audio…'; bufferHint.hidden = false;
@@ -1171,7 +1200,7 @@ async function watch(id, current, controller, refresh) {
       clearTimeout(waitingTimer); if (!retrying) bufferHint.hidden = true;
     };
     video.onwaiting = () => {
-      audio.pause(); healthySince = 0; playbackBusy = true; rebuffers++; discardWarmWatch(); showBuffering();
+      audio.pause(); healthySince = 0; playbackBusy = true; rebuffers++; showBuffering();
       clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         if (disposed || !playingIntent || video.readyState >= 3) return;
@@ -1208,7 +1237,7 @@ async function watch(id, current, controller, refresh) {
     syncTimer = setInterval(() => {
       syncAudio();
       playbackBufferAhead = Math.min(ahead(video), separate ? ahead(audio) : Infinity);
-      if (playbackBufferAhead < 3) discardWarmWatch();
+      if (playbackBufferAhead < 3) { /* hold warm buffer; it recovers */ }
       if (preferences.autoplay && !warmWatch && allowPrefetch()) {
         const nextId = library.queue[0]?.id || $('#related a[href^="#watch="]')?.getAttribute('href').slice(7);
         if (nextId && nextId !== id) prepareWatch(nextId);
@@ -1387,6 +1416,7 @@ async function reel(id, current, controller) {
   function onFullscreenChange() { refreshControls(); }
   const syncAudio = () => {
     if (!separate || disposed) return;
+    if (document.visibilityState === 'hidden') { audio.playbackRate = video.playbackRate; audio.volume = video.volume; audio.muted = video.muted; return; }
     if (Math.abs(audio.currentTime - video.currentTime) > .35 && audio.readyState) audio.currentTime = video.currentTime;
     audio.playbackRate = video.playbackRate; audio.volume = video.volume; audio.muted = video.muted;
   };
