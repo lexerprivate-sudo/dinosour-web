@@ -803,6 +803,13 @@ async function watch(id, current, controller, refresh) {
     if (ring) ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
   };
   const bufferTimer = setInterval(bufferFill, 200);
+  // Watchdog: if within 25s of opening the page the video has not advanced past
+  // its first frame and no retry is in flight, give the user a way forward.
+  const watchdog = setTimeout(() => {
+    if (disposed || firstFrameMs || switching || !video.paused) return;
+    showError('The video did not start in time. It may be region-locked, unavailable, or your network is too slow.');
+  }, 25000);
+
   const showBuffering = () => {
     clearTimeout(waitingTimer);
     if (hasFrame) waitingTimer = setTimeout(() => {
@@ -1174,7 +1181,7 @@ async function watch(id, current, controller, refresh) {
     };
     video.onplay = () => { playingIntent = true; if (video.readyState >= 3) playAudio(); };
     video.onplaying = () => {
-      switching = false; playbackBusy = false; clearTimeout(stallTimer);
+      switching = false; playbackBusy = false; clearTimeout(stallTimer); clearTimeout(watchdog);
       if (!firstFrameMs) firstFrameMs = performance.now() - watchStarted;
       bufferHint.textContent = 'Buffering…'; hideLoading(); clearStatus(); playAudio(); healthySince = Date.now();
     };
