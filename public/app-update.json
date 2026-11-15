@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.2.1",
-  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.1/DinosourWeb.apk",
-  "notes": "Background playback with a notification play/pause control, plus much faster loading: the home feed and Shorts now open instantly on repeat visits, and video title/channel/views appear while the stream prepares. Install over your previous app to keep your library."
+  "versionCode": 8,
+  "versionName": "1.2.2",
+  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.2/DinosourWeb.apk",
+  "notes": "Background playback with a notification play/pause control, a fully animated loading screen (sweeping arc + pulse), and the faster home/Shorts/video loading from the previous update. Install over your previous app to keep your library."
 }
