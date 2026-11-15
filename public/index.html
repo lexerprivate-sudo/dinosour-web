@@ -28,6 +28,7 @@
   <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></symbol>
   <symbol id="i-like" viewBox="0 0 24 24"><path d="M7 10v11H3V10Zm0 0 5-8c3 0 3 3 1 7h6a2 2 0 0 1 2 2l-2 8a2 2 0 0 1-2 2H7"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-library" viewBox="0 0 24 24"><path d="M3 5v16h16M7 2h15v15H7Z"/><path d="m12 6 5 3-5 3Z"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 13a9 9 0 0 1-10-10 9 9 0 1 0 10 10Z"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></symbol>
@@ -68,7 +69,7 @@
     <button class="icon-button" id="share-app" aria-label="Share this server" title="Share this server"><svg class="icon"><use href="#i-share"/></svg></button>
     <button class="icon-button" id="theme-toggle" aria-label="Switch to light theme" title="Switch to light theme"><svg class="icon"><use href="#i-sun"/></svg></button>
     <button class="icon-button" id="android-settings" aria-label="Android app settings" title="Android app settings" hidden><svg class="icon"><use href="#i-settings"/></svg></button>
-    <a class="library-link" href="#saved" title="Watch later"><svg class="icon"><use href="#i-library"/></svg><span>Watch later</span></a>
+    <a class="library-link" href="#library" title="Library"><svg class="icon"><use href="#i-library"/></svg><span>Library</span></a>
   </div>
 </header>
 <button class="nav-scrim" id="nav-scrim" aria-label="Close navigation" tabindex="-1" hidden></button>
@@ -78,8 +79,7 @@
       <a href="#home" data-nav="home" title="Home"><svg class="icon"><use href="#i-home"/></svg><span>Home</span></a>
       <a href="#shorts" data-nav="shorts" title="Shorts"><svg class="icon"><use href="#i-shorts"/></svg><span>Shorts</span></a>
       <a href="#history" data-nav="history" title="History"><svg class="icon"><use href="#i-history"/></svg><span>History</span></a>
-      <a href="#saved" data-nav="saved" title="Watch later"><svg class="icon"><use href="#i-clock"/></svg><span>Watch later</span><small id="saved-count">0</small></a>
-      <a href="#liked" data-nav="liked" title="Liked videos"><svg class="icon"><use href="#i-like"/></svg><span>Liked videos</span></a>
+      <a href="#library" data-nav="library" title="Library"><svg class="icon"><use href="#i-library"/></svg><span>Library</span></a>
     </div>
     <div class="nav-group explore-nav" id="topic-navigation"></div>
   </nav>

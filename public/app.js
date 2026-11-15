@@ -62,7 +62,6 @@ $('#search').addEventListener('input', updateSearch);
 $('#clear-search').onclick = () => { $('#search').value = ''; updateSearch(); $('#search').focus(); };
 function persist() {
   try { localStorage.setItem(key, JSON.stringify(library)); } catch { toast('Device storage is full; changes could not be saved.'); }
-  $('#saved-count').textContent = library.saved.length;
 }
 persist();
 function toast(text) {
@@ -124,7 +123,7 @@ function card(v) {
   const hue = [...(v.channel || '')].reduce((n, char) => n + char.charCodeAt(0), 0) % 360;
   const href = v.type === 'short' ? `#short=${v.id}` : `#watch=${v.id}`;
   const percent = watchProgress(v);
-  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play next: ${escape(v.title)}">Play next</button><button data-queue-add="${v.id}" aria-label="Queue: ${escape(v.title)}">Queue</button></div></div></div></article>`;
+  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play next: ${escape(v.title)}">Play next</button><button data-queue-add="${v.id}" aria-label="Queue: ${escape(v.title)}">Queue</button><button data-save-to="${v.id}" aria-label="Save ${escape(v.title)} to a collection">Save to…</button></div></div></div></article>`;
 }
 function continueWatching() {
   // Older history entries may not have a stored duration yet. Keep them
@@ -355,6 +354,171 @@ function collection(field) {
   prepareVisibleMetadata();
 }
 
+// Library: one page for Watch later, Liked videos and the user's own
+// collections. Collections live inside library.collections on the same
+// dinosour.library.v1 blob, so backup/restore carries them automatically.
+let currentCollectionId = null;
+function refreshLibraryView() {
+  const y = window.scrollY;
+  const hash = location.hash.slice(1);
+  if (hash === 'library' || hash === 'saved' || hash === 'liked') libraryPage();
+  else if (hash.startsWith('collection=')) collectionDetail(decodeValue(hash));
+  else return;
+  window.scrollTo(0, y);
+}
+function compactVideo(id) {
+  const known = videos.get(id);
+  if (known) return compact(known);
+  const title = $('.watch-title')?.textContent?.trim().slice(0, 300) || 'YouTube video';
+  const channel = $('.watch-actions .channel strong')?.textContent?.trim().slice(0, 120) || 'YouTube';
+  return { id, title, channel, thumb: `/api/thumb/${id}`, type: location.hash.startsWith('#short=') ? 'short' : undefined };
+}
+function sectionRail(id, title, items, clearable) {
+  if (!items.length) return '';
+  return `<section class="library-section" id="${id}" aria-labelledby="${id}-title"><div class="library-section-head"><h2 id="${id}-title">${title}<span class="library-count">${items.length}</span></h2>${clearable ? `<button class="library-clear" data-clear-field="${clearable}">${icon('trash')}Clear</button>` : ''}</div><div class="library-rail">${items.slice(0, 12).map(card).join('')}</div></section>`;
+}
+function collectionCard(collection) {
+  const count = collection.items.length;
+  const cells = [0, 1, 2, 3].map(i => collection.items[i]
+    ? `<img src="${escape(collection.items[i].thumb)}" alt="" loading="lazy" decoding="async">`
+    : '<span class="mosaic-fill" aria-hidden="true"></span>').join('');
+  return `<article class="collection-card"><a class="collection-cover" href="#collection=${collection.id}" aria-label="Open collection ${escape(collection.name)}"><span class="mosaic${count === 1 ? ' mosaic-single' : ''}">${cells}</span><span class="collection-count">${count} ${count === 1 ? 'video' : 'videos'}</span></a><div class="collection-meta"><a class="collection-name" href="#collection=${collection.id}" title="${escape(collection.name)}">${escape(collection.name)}</a><div class="collection-tools"><button data-play-all="${collection.id}" aria-label="Play all in ${escape(collection.name)}" title="Play all">${icon('play')}</button><button data-rename-collection="${collection.id}" aria-label="Rename ${escape(collection.name)}" title="Rename">${icon('edit')}</button><button data-delete-collection="${collection.id}" aria-label="Delete ${escape(collection.name)}" title="Delete">${icon('trash')}</button></div></div></article>`;
+}
+function libraryPage() {
+  currentCollectionId = null;
+  document.title = 'Library — Dinosour';
+  main.className = 'library-page';
+  const saved = library.saved, liked = library.liked, collections = library.collections;
+  const total = saved.length + liked.length + collections.reduce((n, c) => n + c.items.length, 0);
+  const hasAnything = saved.length || liked.length || collections.length;
+  main.innerHTML = `<div class="collection-heading"><div><h1>Library</h1><p>${hasAnything ? `${total} ${total === 1 ? 'video' : 'videos'} · Saved on this device` : 'Everything you keep, in one place'}</p></div><div class="collection-actions"><button data-backup>${icon('save')}Backup</button><button class="primary" data-new-collection>${icon('plus')}New collection</button></div></div>${sectionRail('watch-later', 'Watch later', saved, 'saved')}${sectionRail('liked-videos', 'Liked videos', liked, 'liked')}<section class="library-section" id="collections" aria-labelledby="collections-title"><div class="library-section-head"><h2 id="collections-title">Your collections<span class="library-count">${collections.length}</span></h2></div><div class="collection-grid">${collections.map(collectionCard).join('')}<button class="collection-card collection-new" data-new-collection><span class="collection-new-icon">${icon('plus')}</span><span class="collection-new-label">New collection</span><span class="collection-new-hint">Gather the videos you love</span></button></div></section>`;
+  prepareVisibleMetadata();
+}
+function collectionDetail(id) {
+  const col = library.collections.find(c => c.id === id);
+  if (!col) { location.hash = '#library'; return; }
+  currentCollectionId = id;
+  document.title = `${col.name} — Dinosour`;
+  main.className = 'collection-page';
+  const count = col.items.length;
+  main.innerHTML = `<div class="collection-heading"><div><a class="back-link" href="#library">${icon('back')}Library</a><h1>${escape(col.name)}</h1><p>${count} ${count === 1 ? 'video' : 'videos'} · Saved on this device</p></div><div class="collection-actions">${count ? `<button class="primary" data-play-all="${col.id}">${icon('play')}Play all</button>` : ''}<button data-rename-collection="${col.id}">${icon('edit')}Rename</button><button class="clear" data-delete-collection="${col.id}">${icon('trash')}Delete</button></div></div>${count ? `<div class="grid">${col.items.map(item => `<div class="collection-item"><button class="collection-remove" data-uncollect="${item.id}" aria-label="Remove ${escape(item.title)} from ${escape(col.name)}" title="Remove from collection">${icon('close')}</button>${card(item)}</div>`).join('')}</div>` : empty('This collection is empty', 'Save videos here from anywhere using “Save to…” on any video.')}`;
+  prepareVisibleMetadata();
+}
+function sortIntoCollection(collection, id) {
+  const at = collection.items.findIndex(i => i.id === id);
+  if (at >= 0) { collection.items.splice(at, 1); return false; }
+  collection.items = [compactVideo(id), ...collection.items].slice(0, 500);
+  return true;
+}
+function toggleCollectionItem(collectionId, id) {
+  const collection = library.collections.find(c => c.id === collectionId);
+  if (!collection || !id) return;
+  const added = sortIntoCollection(collection, id);
+  persist();
+  toast(added ? `Added to ${collection.name}` : `Removed from ${collection.name}`);
+}
+function playCollection(id) {
+  const col = library.collections.find(c => c.id === id);
+  if (!col || !col.items.length) return;
+  col.items.forEach(item => remember(item));
+  library.queue = col.items.slice(0, 100).map(compact);
+  persist();
+  location.hash = `#watch=${col.items[0].id}`;
+}
+function newCollection(name) {
+  const collection = { id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 40), name, createdAt: Date.now(), items: [] };
+  library.collections = [...library.collections, collection];
+  persist();
+  return collection;
+}
+function ensureCollectionDialog() {
+  let dialog = $('#collection-dialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'collection-dialog'; dialog.className = 'backup-dialog collection-dialog';
+  dialog.innerHTML = `<form id="collection-form"><div class="dialog-heading"><h2 id="collection-dialog-title">New collection</h2><button class="icon-button" id="collection-dialog-close" type="button" aria-label="Close">${icon('close')}</button></div><label for="collection-name">Collection name</label><input id="collection-name" name="name" maxlength="80" required autocomplete="off" placeholder="e.g. Design inspo, Workouts, Recipes"><div class="dialog-actions"><button id="collection-cancel" type="button">Cancel</button><button class="primary" type="submit">Save</button></div></form>`;
+  document.body.append(dialog);
+  dialog.querySelector('#collection-dialog-close').onclick = () => dialog.close();
+  dialog.querySelector('#collection-cancel').onclick = () => dialog.close();
+  dialog.querySelector('#collection-name').oninput = event => event.target.setCustomValidity('');
+  dialog.querySelector('#collection-form').onsubmit = event => {
+    event.preventDefault();
+    const input = dialog.querySelector('#collection-name');
+    const name = input.value.replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!name) { input.setCustomValidity('Enter a collection name.'); input.reportValidity(); return; }
+    if (dialog.dataset.mode === 'rename') {
+      const col = library.collections.find(c => c.id === dialog.dataset.id);
+      if (col) { col.name = name; toast('Collection renamed'); persist(); }
+      dialog.close(); refreshLibraryView();
+      return;
+    }
+    const collection = newCollection(name);
+    toast(`Collection “${name}” created`);
+    dialog.close();
+    location.hash = `#collection=${collection.id}`;
+  };
+  return dialog;
+}
+function openCollectionDialog(mode, id) {
+  const dialog = ensureCollectionDialog();
+  dialog.dataset.mode = mode;
+  dialog.dataset.id = id || '';
+  dialog.querySelector('#collection-dialog-title').textContent = mode === 'rename' ? 'Rename collection' : 'New collection';
+  const input = dialog.querySelector('#collection-name');
+  input.value = mode === 'rename' ? (library.collections.find(c => c.id === id)?.name || '') : '';
+  dialog.showModal();
+  input.focus();
+  input.select();
+}
+let saveToVideoId = null;
+function ensureSaveToDialog() {
+  let dialog = $('#save-to-dialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'save-to-dialog'; dialog.className = 'backup-dialog save-to-dialog';
+  dialog.innerHTML = `<div class="dialog-heading"><h2>Save to…</h2><button class="icon-button" id="save-to-close" type="button" aria-label="Close">${icon('close')}</button></div><p class="save-to-sub">Add this video to Watch later or one of your collections.</p><div class="save-to-list" id="save-to-list"></div><form id="save-to-new" class="save-to-new"><input id="save-to-name" maxlength="80" autocomplete="off" placeholder="New collection name" aria-label="New collection name"><button class="primary" type="submit">Create</button></form><div class="dialog-actions"><button class="primary" id="save-to-done" type="button">Done</button></div>`;
+  document.body.append(dialog);
+  dialog.querySelector('#save-to-close').onclick = () => dialog.close();
+  dialog.querySelector('#save-to-done').onclick = () => dialog.close();
+  dialog.querySelector('#save-to-name').oninput = event => event.target.setCustomValidity('');
+  dialog.querySelector('#save-to-list').addEventListener('click', event => {
+    const watchLater = event.target.closest('[data-save-watch-later]');
+    if (watchLater) { toggle('saved', saveToVideoId); renderSaveToList(); refreshLibraryView(); return; }
+    const row = event.target.closest('[data-save-collection]');
+    if (row) { toggleCollectionItem(row.dataset.saveCollection, saveToVideoId); renderSaveToList(); refreshLibraryView(); }
+  });
+  dialog.querySelector('#save-to-new').onsubmit = event => {
+    event.preventDefault();
+    const input = dialog.querySelector('#save-to-name');
+    const name = input.value.replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!name) { input.setCustomValidity('Enter a collection name.'); input.reportValidity(); return; }
+    const collection = newCollection(name);
+    sortIntoCollection(collection, saveToVideoId);
+    persist();
+    input.value = '';
+    toast(`Saved to “${name}”`);
+    renderSaveToList();
+    refreshLibraryView();
+  };
+  return dialog;
+}
+function renderSaveToList() {
+  const list = $('#save-to-list');
+  if (!list) return;
+  const savedIn = library.saved.some(i => i.id === saveToVideoId);
+  list.innerHTML = `<button class="save-row" data-save-watch-later aria-pressed="${savedIn}"><span class="save-row-icon">${icon('clock')}</span><span class="save-row-text">Watch later<small>${library.saved.length} ${library.saved.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${savedIn ? 'on' : ''}">${icon(savedIn ? 'check' : 'plus')}</span></button>${library.collections.map(c => {
+    const inCollection = c.items.some(i => i.id === saveToVideoId);
+    return `<button class="save-row" data-save-collection="${c.id}" aria-pressed="${inCollection}"><span class="save-row-icon">${icon('library')}</span><span class="save-row-text">${escape(c.name)}<small>${c.items.length} ${c.items.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${inCollection ? 'on' : ''}">${icon(inCollection ? 'check' : 'plus')}</span></button>`;
+  }).join('')}${library.collections.length === 0 ? '<p class="save-to-empty">No collections yet — create one below and this video goes straight in.</p>' : ''}`;
+}
+function openSaveToDialog(id) {
+  if (!id) return;
+  saveToVideoId = id;
+  const dialog = ensureSaveToDialog();
+  renderSaveToList();
+  dialog.showModal();
+}
+
 // Resolve the slow stream-details step while the viewer is browsing, rather
 // than waiting until touch-down. Only three visible cards, one request at a time.
 function prepareVisibleMetadata() {
@@ -393,6 +557,8 @@ function bindInfoActions(id) {
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-pressed', String(selected));
   };
+  const saveToButton = $('#save-to');
+  if (saveToButton) saveToButton.onclick = () => openSaveToDialog(id);
   $('#share').onclick = async () => {
     try { await navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${id}`); toast('YouTube link copied'); } catch { toast('Copy the video link from your address bar.'); }
   };
@@ -616,6 +782,21 @@ function cleanLibraryItem(item) {
   if (item.type === 'short') clean.type = 'short';
   return clean;
 }
+function cleanCollection(source) {
+  if (!source || typeof source !== 'object') return null;
+  const name = typeof source.name === 'string' ? source.name.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  if (!name) return null;
+  const id = typeof source.id === 'string' && /^c[a-z0-9]{8,40}$/i.test(source.id)
+    ? source.id
+    : `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 40);
+  const createdAt = Number.isFinite(source.createdAt) && source.createdAt > 0 ? source.createdAt : Date.now();
+  const seen = new Set();
+  const items = (Array.isArray(source.items) ? source.items : [])
+    .map(cleanLibraryItem)
+    .filter(item => item && !seen.has(item.id) && seen.add(item.id))
+    .slice(0, 500);
+  return { id, name, createdAt, items };
+}
 function sanitizeLibrary(source) {
   const clean = {};
   for (const field of ['saved', 'history', 'liked', 'queue']) {
@@ -624,6 +805,11 @@ function sanitizeLibrary(source) {
     const limit = field === 'queue' ? 100 : field === 'history' ? 200 : 500;
     clean[field] = list.map(cleanLibraryItem).filter(item => item && !seen.has(item.id) && seen.add(item.id)).slice(0, limit);
   }
+  const collections = Array.isArray(source?.collections) ? source.collections : [];
+  const seenCollections = new Set();
+  clean.collections = collections.map(cleanCollection)
+    .filter(collection => collection && !seenCollections.has(collection.id) && seenCollections.add(collection.id))
+    .slice(0, 50);
   return clean;
 }
 function sanitizeBackup(data) {
@@ -648,6 +834,17 @@ function mergeLibrary(current, incoming) {
     if (!previous || (item.watchedAt || 0) > (previous.watchedAt || 0)) history.set(item.id, item);
   }
   merged.history = [...history.values()].sort((a, b) => (b.watchedAt || 0) - (a.watchedAt || 0)).slice(0, 200);
+  const collections = new Map();
+  for (const collection of [...(current.collections || []), ...(incoming.collections || [])]) {
+    const existing = collections.get(collection.id);
+    if (!existing) { collections.set(collection.id, { ...collection, items: [...collection.items] }); continue; }
+    const mergedItems = new Map();
+    for (const item of [...collection.items, ...existing.items]) {
+      if (!mergedItems.has(item.id)) mergedItems.set(item.id, item);
+    }
+    collections.set(collection.id, { ...existing, name: existing.name || collection.name, items: [...mergedItems.values()].slice(0, 500) });
+  }
+  merged.collections = [...collections.values()].slice(0, 50);
   return merged;
 }
 function applyBackup(data, replace) {
@@ -662,9 +859,9 @@ function applyBackup(data, replace) {
   preferences.topics = [...new Set((preferences.topics || []).filter(t => typeof t === 'string'))];
   preferences.recentSearches = (preferences.recentSearches || []).slice(0, 8);
   persist(); savePreferences(); setTheme(preferences.theme === 'light' || (!preferences.theme && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark'); renderTopicNavigation();
-  $('#saved-count').textContent = library.saved.length;
   const hash = location.hash.slice(1) || 'home';
-  if (['saved', 'history', 'liked'].includes(hash)) collection(hash);
+  if (hash === 'history') collection('history');
+  else if (hash === 'library' || hash === 'saved' || hash === 'liked' || hash.startsWith('collection=')) refreshLibraryView();
   else if (hash === 'home') route();
   toast(replace ? 'Backup restored' : 'Backup merged');
 }
@@ -673,7 +870,7 @@ function openBackupDialog() {
   if (!dialog) {
     dialog = document.createElement('dialog');
     dialog.id = 'backup-dialog'; dialog.className = 'backup-dialog';
-    dialog.innerHTML = `<div class="dialog-heading"><h2>Backup &amp; restore</h2><button type="button" data-close-backup aria-label="Close">×</button></div><p class="backup-intro">Save your topics, Watch later, history, liked videos, queue and playback settings as one file. Restore it here or on another device.</p><div class="backup-actions"><button class="primary" type="button" data-export-backup>Download backup</button><button type="button" data-import-backup>Restore from file</button><input id="backup-file" type="file" accept="application/json,.json" hidden></div><div id="backup-summary" class="backup-summary" role="status"></div>`;
+    dialog.innerHTML = `<div class="dialog-heading"><h2>Backup &amp; restore</h2><button type="button" data-close-backup aria-label="Close">×</button></div><p class="backup-intro">Save your topics, Watch later, liked videos, collections, history, queue and playback settings as one file. Restore it here or on another device.</p><div class="backup-actions"><button class="primary" type="button" data-export-backup>Download backup</button><button type="button" data-import-backup>Restore from file</button><input id="backup-file" type="file" accept="application/json,.json" hidden></div><div id="backup-summary" class="backup-summary" role="status"></div>`;
     document.body.append(dialog);
     dialog.querySelector('[data-close-backup]').onclick = () => dialog.close();
     dialog.querySelector('[data-export-backup]').onclick = () => {
@@ -700,7 +897,7 @@ function openBackupDialog() {
         const data = JSON.parse(await selected.text());
         const clean = sanitizeBackup(data);
         window.__pendingBackup = data;
-        summary.innerHTML = `<p><strong>${escape(selected.name)}</strong> contains ${clean.library.saved.length} saved, ${clean.library.history.length} history, ${clean.library.liked.length} liked and ${clean.library.queue.length} queued videos.</p><div class="backup-choice"><button type="button" data-backup-merge>Merge with this device</button><button type="button" class="primary" data-backup-replace>Replace everything</button></div>`;
+        summary.innerHTML = `<p><strong>${escape(selected.name)}</strong> contains ${clean.library.saved.length} saved, ${clean.library.history.length} history, ${clean.library.liked.length} liked, ${clean.library.collections.length} ${clean.library.collections.length === 1 ? 'collection' : 'collections'} and ${clean.library.queue.length} queued videos.</p><div class="backup-choice"><button type="button" data-backup-merge>Merge with this device</button><button type="button" class="primary" data-backup-replace>Replace everything</button></div>`;
         summary.querySelector('[data-backup-merge]').onclick = () => applyBackup(data, false);
         summary.querySelector('[data-backup-replace]').onclick = () => applyBackup(data, true);
       } catch (error) {
@@ -937,7 +1134,7 @@ async function watch(id, current, controller, refresh) {
     const savedPosition = sessionStorage.getItem(restartKey) ? 0 : (library.history.find(v => v.id === id)?.position || 0);
     sessionStorage.removeItem(restartKey);
     setMediaMetadata(info.title, info.channel);
-    $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
+    $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="save-to">${icon('library')}Save to…</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
     bindInfoActions(id);
     library.queue = library.queue.filter(v => v.id !== id); persist();
     $('.watch-related').insertAdjacentHTML('afterbegin', '<section id="watch-queue"></section>');
@@ -1826,6 +2023,7 @@ async function route(refresh = false) {
   if (!hash.startsWith('watch=')) discardWarmWatch();
   document.querySelectorAll('[data-nav]').forEach(a => {
     let active = a.dataset.nav === hash || a.dataset.nav === value;
+    if (a.dataset.nav === 'library') active = hash === 'library' || hash.startsWith('collection=');
     if (a.dataset.nav === 'shorts') active = hash === 'shorts' || hash.startsWith('shorts=') || hash.startsWith('short=');
     a.classList.toggle('active', active);
     if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -1835,7 +2033,14 @@ async function route(refresh = false) {
   if (hash.startsWith('watch=') && /^[\w-]{11}$/.test(value)) await watch(value, current, routeController, refresh === true);
   else if (hash.startsWith('short=') && /^[\w-]{11}$/.test(value)) await reel(value, current, routeController);
   else if (hash === 'shorts' || hash.startsWith('shorts=')) await feed(hash.startsWith('shorts=') ? value : '', current, routeController, 'shorts');
-  else if (['saved', 'history', 'liked'].includes(hash)) collection(hash);
+  else if (hash === 'library') libraryPage();
+  else if (hash.startsWith('collection=')) collectionDetail(value || '');
+  else if (hash === 'saved' || hash === 'liked') {
+    libraryPage();
+    const target = hash === 'saved' ? 'watch-later' : 'liked-videos';
+    requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ block: 'start' }));
+  }
+  else if (hash === 'history') collection('history');
   else await feed(hash.startsWith('search=') ? value : '', current, routeController);
 }
 function getVideoId(text) {
@@ -1963,7 +2168,62 @@ document.addEventListener('click', event => {
     save.setAttribute('aria-pressed', String(selected));
     save.setAttribute('aria-label', `${selected ? 'Remove from' : 'Save to'} Watch later`);
     save.title = selected ? 'Saved to Watch later' : 'Watch later';
-    if (location.hash === '#saved') collection('saved');
+    if (location.hash === '#library' || location.hash === '#saved' || location.hash === '#liked' || location.hash.startsWith('#collection=')) refreshLibraryView();
+  }
+  const saveTo = event.target.closest('[data-save-to]');
+  if (saveTo) { event.preventDefault(); openSaveToDialog(saveTo.dataset.saveTo); return; }
+  const newCollectionButton = event.target.closest('[data-new-collection]');
+  if (newCollectionButton) { event.preventDefault(); openCollectionDialog('create'); return; }
+  const renameCollectionButton = event.target.closest('[data-rename-collection]');
+  if (renameCollectionButton) { openCollectionDialog('rename', renameCollectionButton.dataset.renameCollection); return; }
+  const deleteCollectionButton = event.target.closest('[data-delete-collection]');
+  if (deleteCollectionButton) {
+    if (deleteCollectionButton.dataset.armed === '1') {
+      const id = deleteCollectionButton.dataset.deleteCollection;
+      library.collections = library.collections.filter(c => c.id !== id);
+      persist();
+      toast('Collection deleted');
+      if (location.hash.startsWith('#collection=')) location.hash = '#library';
+      else refreshLibraryView();
+    } else {
+      deleteCollectionButton.dataset.armed = '1';
+      deleteCollectionButton.classList.add('armed');
+      deleteCollectionButton.dataset.label = deleteCollectionButton.getAttribute('aria-label') || 'Delete';
+      deleteCollectionButton.setAttribute('aria-label', 'Confirm delete');
+      deleteCollectionButton.title = 'Click again to delete';
+      setTimeout(() => {
+        if (!document.body.contains(deleteCollectionButton)) return;
+        delete deleteCollectionButton.dataset.armed;
+        deleteCollectionButton.classList.remove('armed');
+        deleteCollectionButton.setAttribute('aria-label', deleteCollectionButton.dataset.label || 'Delete');
+        deleteCollectionButton.title = '';
+      }, 4000);
+    }
+    return;
+  }
+  const playAllButton = event.target.closest('[data-play-all]');
+  if (playAllButton) { event.preventDefault(); playCollection(playAllButton.dataset.playAll); return; }
+  const removeFromCollectionButton = event.target.closest('[data-uncollect]');
+  if (removeFromCollectionButton && currentCollectionId) {
+    const target = library.collections.find(c => c.id === currentCollectionId);
+    if (target) {
+      target.items = target.items.filter(item => item.id !== removeFromCollectionButton.dataset.uncollect);
+      persist();
+      toast(`Removed from ${target.name}`);
+      refreshLibraryView();
+    }
+    return;
+  }
+  const clearFieldButton = event.target.closest('[data-clear-field]');
+  if (clearFieldButton) {
+    const field = clearFieldButton.dataset.clearField;
+    if (field === 'saved' || field === 'liked') {
+      library[field] = [];
+      persist();
+      refreshLibraryView();
+      toast(field === 'saved' ? 'Watch later cleared' : 'Liked videos cleared');
+    }
+    return;
   }
   if (event.target.closest('[data-retry]')) {
     const id = location.hash.match(/^#(?:watch|short)=([\w-]{11})/)?.[1];

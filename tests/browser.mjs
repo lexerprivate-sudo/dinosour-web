@@ -20,7 +20,7 @@ try {
   console.log('Search loaded');
   assert.ok(await page.locator('#results .card').count() > 0);
   await page.locator('[data-save]').first().click({ force: true });
-  await page.locator('[data-nav="saved"]').click();
+  await page.locator('[data-nav="library"]').click();
   await page.locator('.card h3 a').first().waitFor();
   assert.match(await page.locator('.card h3').first().textContent(), /Big Buck Bunny/i);
   await page.locator('#search').fill('https://www.youtube.com/watch?v=aqz-KE-bpKQ');

@@ -193,6 +193,10 @@ invite link (refresh the in-app Share screen to show it).
 - Native playback controls, seeking, volume, fullscreen, and 0.5–2× speed on the
   watch page, plus an explicit volume slider and mute button in the Playback row.
   The slider controls the separate audio track too and is remembered on your device.
+- One **Library** page for Watch later, liked videos, and your own collections:
+  gather videos you love into named collections, rename or delete them any time,
+  and play a whole collection in one tap. Collections live in the same local
+  storage as everything else.
 - Watch later, liked videos, and watch history with resume positions.
 - **Continue watching** on Home: unfinished videos appear in a horizontal rail
   with a progress bar, **Resume**, **Start over**, per-item **x**, and **Clear**.
@@ -210,7 +214,8 @@ invite link (refresh the in-app Share screen to show it).
   Fullscreen button sits beside the other player controls.
 - **Backup and restore:** open **Backup** in the sidebar or a library page to
   download a JSON backup. Restore can merge with this device or replace its
-  saved videos, history, liked videos, queue, topics, and playback settings.
+  saved videos, history, liked videos, collections, queue, topics, and playback
+  settings.
 - **Storage repair:** a damaged or hand-edited local library is cleaned on load,
   so invalid entries cannot crash the app. Unsafe thumbnail URLs are replaced,
   duplicate items are removed, and list limits are enforced automatically.
