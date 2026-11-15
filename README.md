@@ -39,7 +39,7 @@ reuse their buffered media.
 
 ## Android: open and watch
 
-The **1.2.4 Android app is standalone**: install `DinosourWeb.apk`, open it,
+The **1.2.5 Android app is standalone**: install `DinosourWeb.apk`, open it,
 and watch using Wi-Fi or mobile data. No PC, server address, tunnel, invite code,
 hosting account, or YouTube account is required. The interface and playback
 engine are bundled in the APK. Only public, unrestricted recorded videos are
@@ -332,10 +332,10 @@ A signed standalone Android build is included:
 
 - Download the latest APK:
   <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
-- Local copies: `releases\DinosourWeb-1.2.4.apk` in this project folder
+- Local copies: `releases\DinosourWeb-1.2.5.apk` in this project folder
 - Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.4`
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.5`
 - Opens directly to Home. Settings contain app information and update checks,
   with no server-address prompt.
 - Shows a native opening screen until the interface is ready, independently of
@@ -409,7 +409,7 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.4` release hosts
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.5` release hosts
 `DinosourWeb.apk`. Update metadata uses the version-specific APK URL so an update
 check cannot accidentally download an older asset while a release is publishing.
 The `/releases/latest/download/DinosourWeb.apk` link remains the easy sharing URL.
