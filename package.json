@@ -38,5 +38,6 @@
     "@playwright/test": "^1.65.0",
     "electron": "45.3.2",
     "electron-builder": "26.18.0"
-  }
+  },
+  "license": "GPL-3.0-only"
 }

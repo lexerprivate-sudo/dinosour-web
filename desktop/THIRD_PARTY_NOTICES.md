@@ -11,10 +11,10 @@
   https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/THIRD_PARTY_LICENSES.txt
   SHA-256: f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d
 
-The desktop distribution is GPL-3.0. A full license copy is included as
-`android/COPYING` inside the application archive. Dinosour desktop source and
-build instructions are published at:
-https://github.com/lexerprivate-sudo/dinosour-web/tree/desktop-v1.0.1
+The desktop distribution is GPL-3.0. See `LICENSE` at the repository root for
+the full license text. Dinosour desktop source and build instructions are
+published at:
+https://github.com/lexerprivate-sudo/dinosour-web
 
 The installer bundles the playback runtime at build time. No FFmpeg binary is
 bundled; the interface plays separate video and audio tracks directly.

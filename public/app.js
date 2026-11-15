@@ -36,7 +36,7 @@ function setTheme(theme) {
   $('#theme-toggle').title = label;
   document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#ffffff' : '#0f0f0f';
 }
-setTheme(preferences.theme === 'light' ? 'light' : 'dark');
+setTheme(preferences.theme === 'light' || (!preferences.theme && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark');
 $('#theme-toggle').onclick = () => {
   preferences.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
   setTheme(preferences.theme); savePreferences();
@@ -124,7 +124,7 @@ function card(v) {
   const hue = [...(v.channel || '')].reduce((n, char) => n + char.charCodeAt(0), 0) % 360;
   const href = v.type === 'short' ? `#short=${v.id}` : `#watch=${v.id}`;
   const percent = watchProgress(v);
-  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play ${escape(v.title)} next">Play next</button><button data-queue-add="${v.id}" aria-label="Add ${escape(v.title)} to queue">+ Queue</button></div></div></div></article>`;
+  return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play next: ${escape(v.title)}">Play next</button><button data-queue-add="${v.id}" aria-label="Queue: ${escape(v.title)}">Queue</button></div></div></div></article>`;
 }
 function continueWatching() {
   // Older history entries may not have a stored duration yet. Keep them
@@ -208,7 +208,7 @@ async function feed(query, current, controller, mode = 'video') {
   const heading = shorts
     ? `<div class="search-heading shorts-heading"><h1>${query ? `Shorts for ${escape(query)}` : 'Shorts'}</h1></div>`
     : home ? '<h1 class="sr-only">Home</h1>' : `<div class="search-heading"><h1>Results for ${escape(query)}</h1><span>Videos</span></div>`;
-  main.innerHTML = `${chips(query || '', shorts ? 'shorts' : 'search')}${home ? continueWatching() : ''}${heading}${filterBar}<div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
+  main.innerHTML = `${chips(query || '', shorts ? 'shorts' : 'search')}${home ? continueWatching() : ''}${heading}${filterBar}<h2 class="sr-only">${shorts ? 'Shorts feed' : 'Videos'}</h2><div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
   let continuation = '', loading = false, ended = false, failed = false, initialized = false, frame;
   const seen = new Set(), usedCursors = new Set(), allResults = [];
   const durationMatches = v => filters.duration === 'any' || !v.duration ||
@@ -639,7 +639,7 @@ function applyBackup(data, replace) {
   };
   preferences.topics = [...new Set((preferences.topics || []).filter(t => typeof t === 'string'))];
   preferences.recentSearches = (preferences.recentSearches || []).slice(0, 8);
-  persist(); savePreferences(); setTheme(preferences.theme === 'light' ? 'light' : 'dark'); renderTopicNavigation();
+  persist(); savePreferences(); setTheme(preferences.theme === 'light' || (!preferences.theme && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark'); renderTopicNavigation();
   $('#saved-count').textContent = library.saved.length;
   const hash = location.hash.slice(1) || 'home';
   if (['saved', 'history', 'liked'].includes(hash)) collection(hash);
@@ -731,7 +731,7 @@ async function watch(id, current, controller, refresh) {
   if (warmed) { clearTimeout(warmed.expiry); warmWatch = null; }
   else discardWarmWatch();
   main.className = 'watch-page';
-  main.innerHTML = `<div class="watch-layout"><section class="watch-primary"><div class="player-shell"><video id="video" controls playsinline preload="auto"></video><audio id="audio" preload="auto"></audio><div id="player-status" class="player-status" hidden></div></div><div id="watch-info"></div></section><aside class="watch-related"><h2>More to watch</h2><div id="related">${skeleton()}</div></aside></div>`;
+  main.innerHTML = `<div class="watch-layout"><section class="watch-primary"><div class="player-shell"><video id="video" controls playsinline preload="auto"></video><audio id="audio" preload="auto"></audio><div id="player-status" class="player-status" hidden></div></div><div id="watch-info"></div></section><aside class="watch-related" aria-label="Up next and related"><h2>More to watch</h2><div id="related">${skeleton()}</div></aside></div>`;
   if (warmed) {
     warmed.video.id = 'video'; warmed.audio.id = 'audio';
     $('#video').replaceWith(warmed.video); $('#audio').replaceWith(warmed.audio);
@@ -1744,6 +1744,9 @@ async function route(refresh = false) {
   routeController?.abort(); cleanup(); cleanup = () => {};
   routeController = new AbortController();
   window.scrollTo(0, 0);
+  // Keyboard/screen-reader users land on the main landmark after navigation.
+  // preventScroll because the route may re-attach the mini player without a scroll.
+  try { main.focus({ preventScroll: true }); } catch {}
   document.title = 'Dinosour';
   closeNavigation();
   const hash = location.hash.slice(1) || 'home';
@@ -1940,15 +1943,23 @@ if (window.DinosourAndroid?.openSettings) {
 window.__dinosourReady = true;
 window.DinosourAndroid?.appReady?.();
 // Track media playback state for the OS media notification and keep the
-// Android background-audio service in sync. Only the active player element
-// carries the #video id, so preloaded buffers never trigger either.
-document.addEventListener('playing', event => {
-  if (event.target.id !== 'video') return;
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-  window.DinosourAndroid?.backgroundAudio?.(true, document.title.replace(/ — Dinosour$/, ''));
-}, true);
-document.addEventListener('pause', event => {
-  if (event.target.id !== 'video') return;
-  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-  window.DinosourAndroid?.backgroundAudio?.(false, '');
-}, true);
+// Android background-audio service in sync. "Active media" is the visible
+// player pair: on the watch page the video id is #video and the separate
+// audio element is #audio; on the Shorts reel both share those ids with the
+// active pair only. Preloaded (idle) pairs carry no ids, so they never
+// trigger this. While the app is hidden, the video track is paused but the
+// audio keeps playing — the foreground service must stay up for that case.
+const activeMediaPlaying = () => {
+  for (const sel of ['#video', '#audio']) {
+    const m = document.querySelector(sel);
+    if (m && !m.paused && !m.ended) return true;
+  }
+  return false;
+};
+const syncMediaState = () => {
+  const playing = activeMediaPlaying();
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  window.DinosourAndroid?.backgroundAudio?.(playing, playing ? document.title.replace(/ — Dinosour$/, '') : '');
+};
+document.addEventListener('playing', event => { if (['VIDEO', 'AUDIO'].includes(event.target.tagName)) syncMediaState(); }, true);
+document.addEventListener('pause', event => { if (['VIDEO', 'AUDIO'].includes(event.target.tagName)) syncMediaState(); }, true);

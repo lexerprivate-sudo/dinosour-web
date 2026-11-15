@@ -1,7 +1,11 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 const base = process.env.TEST_URL || 'http://127.0.0.1:3210';
+const swSource = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
+const shellCache = swSource.match(/dinosour-shell-v\d+/)?.[0];
+assert.ok(shellCache, 'could not find the shell cache name in sw.js');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -13,9 +17,9 @@ try {
   });
   assert.equal(registration.active, 'activated', `service worker did not activate: ${JSON.stringify(registration)}`);
   assert.ok(registration.scope.startsWith(base + '/'), `unexpected service worker scope: ${registration.scope}`);
-  assert.ok(registration.caches.includes('dinosour-shell-v3'), `shell cache missing: ${JSON.stringify(registration.caches)}`);
+  assert.ok(registration.caches.includes(shellCache), `shell cache missing (expected ${shellCache}): ${JSON.stringify(registration.caches)}`);
   for (const path of ['/native.js', '/startup.js']) {
-    assert.equal(await page.evaluate(async path => !!(await (await caches.open('dinosour-shell-v3')).match(path)), path), true, `${path} must be available offline`);
+    assert.equal(await page.evaluate(async ([path, shell]) => !!(await (await caches.open(shell)).match(path)), [path, shellCache]), true, `${path} must be available offline`);
   }
 
   await page.waitForTimeout(1000);

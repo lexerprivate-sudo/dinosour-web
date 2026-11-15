@@ -53,7 +53,6 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final String PREFS = "dinosour";
     private static final String KEY_SERVER = "server_url";
-    private static final String KEY_LAST_PAGE = "last_page";
     private static final int BG = Color.rgb(15, 15, 15);
     private static final int ACCENT = Color.rgb(255, 0, 51);
 
@@ -71,7 +70,7 @@ public class MainActivity extends Activity {
     private NativeEngine engine;
     private android.webkit.ValueCallback<Uri[]> fileCallback;
     private String pendingBackup;
-    private static final int OPEN_BACKUP = 501, SAVE_BACKUP = 502;
+    private static final int OPEN_BACKUP = 501, SAVE_BACKUP = 502, REQUEST_NOTIFICATIONS = 503;
     private static final String[] STORAGE_KEYS = {"dinosour.library.v1", "dinosour.ui.v1"};
     private LinearLayout startupView;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -89,6 +88,16 @@ public class MainActivity extends Activity {
         String previousServer = prefs.getString(KEY_SERVER, null);
         serverUrl = Config.APP_ORIGIN;
         setupWindow();
+        // Android 13+ requires a runtime grant before ANY app notification
+        // appears; without this ask, the background-audio notification and its
+        // lock-screen controls never render. Declines are respected (the app
+        // stays silent, which is a valid choice).
+        if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_NOTIFICATIONS);
+        }
         buildLayout();
         engine = new NativeEngine(this, (id, payload) -> runOnUiThread(() -> {
             if (!isFinishing() && !isDestroyed() && webView != null)
@@ -136,7 +145,7 @@ public class MainActivity extends Activity {
         settings.setGeolocationEnabled(false);
         settings.setSaveFormData(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
         webView.addJavascriptInterface(new AndroidBridge(), "DinosourAndroid");
@@ -382,34 +391,6 @@ public class MainActivity extends Activity {
         new android.os.Handler(getMainLooper()).postDelayed(finish, 2500);
     }
 
-    private void testServer(String input) {
-        String value = normalizeServer(input);
-        if (value == null) {
-            toast("Enter an address such as http://192.168.1.10:3210");
-            return;
-        }
-        toast("Checking " + value + "...");
-        final String base = value;
-        new Thread(() -> {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(base + "/api/ping").openConnection();
-                connection.setConnectTimeout(8000);
-                connection.setReadTimeout(8000);
-                connection.setRequestProperty("Accept", "application/json");
-                int status = connection.getResponseCode();
-                runOnUiThread(() -> {
-                    if (status == 200) toast("Connected to Dinosour.");
-                    else toast("The server answered HTTP " + status + ". Check the address or access link.");
-                });
-            } catch (Exception error) {
-                runOnUiThread(() -> toast("Could not reach " + base + ". Start the server and check the address."));
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
-        }).start();
-    }
-
     private void checkForUpdates(String base) {
         if (base == null) {
             toast("Connect to a server first.");
@@ -574,8 +555,7 @@ public class MainActivity extends Activity {
                 view.evaluateJavascript("window.__dinosourReady === true", value -> {
                     if ("true".equals(value)) interfaceReady();
                 });
-                if (url != null && url.startsWith(serverUrl + "/")) prefs.edit().putString(KEY_LAST_PAGE, url).apply();
-            }
+                    }
         }
 
         @Override

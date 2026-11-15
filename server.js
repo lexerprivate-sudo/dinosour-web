@@ -3,7 +3,8 @@ import https from 'node:https';
 import os from 'node:os';
 import { isIP } from 'node:net';
 import { spawn, execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -581,15 +582,23 @@ const server = http.createServer(async (req, res) => {
       return res.end(req.method === 'HEAD' ? undefined : body);
     }
     if (url.pathname === '/download/DinosourWeb.apk') {
-      const body = await readFile(root + 'download/DinosourWeb.apk').catch(() => null);
-      if (!body) return json(res, 404, { error: 'The Android APK has not been built yet.' });
-      res.writeHead(200, {
-        'content-type': 'application/vnd.android.package-archive',
-        'content-length': body.length,
-        'content-disposition': 'attachment; filename="DinosourWeb.apk"',
-        'cache-control': 'no-store',
-      });
-      return res.end(req.method === 'HEAD' ? undefined : body);
+      // Prefer the local build when present; otherwise redirect to the latest
+      // Android release asset so freshly self-hosted instances still work.
+      const local = await stat(root + 'download/DinosourWeb.apk').catch(() => null);
+      if (local) {
+        res.writeHead(200, {
+          'content-type': 'application/vnd.android.package-archive',
+          'content-length': local.size,
+          'content-disposition': 'attachment; filename="DinosourWeb.apk"',
+          'cache-control': 'no-store',
+        });
+        if (req.method === 'HEAD') return res.end();
+        const stream = createReadStream(root + 'download/DinosourWeb.apk');
+        stream.pipe(res);
+        return;
+      }
+      res.writeHead(302, { location: 'https://github.com/lexerprivate-sudo/dinosour-web/releases/latest/download/DinosourWeb.apk', 'cache-control': 'no-store' });
+      return res.end();
     }
     const files = {
       '/': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
@@ -610,7 +619,15 @@ const server = http.createServer(async (req, res) => {
     const file = files[url.pathname];
     if (!file) return json(res, 404, { error: 'Not found.' });
     const body = await readFile(root + file[0]);
-    res.writeHead(200, { 'content-type': file[1], 'content-length': body.length, 'cache-control': file[2] });
+    const isHtml = file[1].startsWith('text/html');
+    res.writeHead(200, {
+      'content-type': file[1],
+      'content-length': body.length,
+      'cache-control': file[2],
+      // A conservative CSP: the app uses no remote code; images come from us or
+      // i.ytimg.com; media flows same-origin or via the localhost loopback media port.
+      ...(isHtml ? { 'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ytimg.com data:; media-src 'self' https://*.googlevideo.com http://127.0.0.1:* http://localhost:* blob:; connect-src 'self' blob:; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" } : {}),
+    });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch (error) {
     if (res.destroyed) return;

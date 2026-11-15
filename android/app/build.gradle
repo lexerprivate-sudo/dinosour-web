@@ -7,6 +7,17 @@ def keystorePropertiesFile = rootProject.file('keystore.properties')
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
+// Release builds must never fall back to debug signing. An accidentally
+// debug-signed APK would be rejected by Android as an update for anyone who
+// installed a signed release, and would silently strand them there.
+if (gradle.taskGraph.hasTask('assembleRelease') || gradle.taskGraph.hasTask('bundleRelease')) {
+    if (!keystorePropertiesFile.exists()) {
+        throw new GradleException('keystore.properties is missing; refusing to build a release APK (debug signing fallback disabled).')
+    }
+    ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { key ->
+        if (!keystoreProperties[key]?.trim()) throw new GradleException("keystore.properties is missing '${key}'.")
+    }
+}
 
 android {
     namespace 'com.dinosour.web'
@@ -38,7 +49,7 @@ android {
         release {
             minifyEnabled false
             shrinkResources false
-            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 

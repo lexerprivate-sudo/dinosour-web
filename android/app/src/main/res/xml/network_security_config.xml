@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Dinosour only ever talks to HTTPS origins: its own virtual app origin
+         and public YouTube endpoints. No cleartext traffic is allowed. -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

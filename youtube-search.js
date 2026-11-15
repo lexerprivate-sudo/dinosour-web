@@ -91,7 +91,11 @@ const BROWSE_HEADERS = {
   cookie: 'CONSENT=YES+cb.20210328-17-p0.en+FX+000; SOCS=CAI',
 };
 
-async function shortDetails(id) {
+// One shared metadata read of the anonymous player response (title, channel,
+// views, duration, thumbnail). Used by the watch fast-header (10 min SWR at
+// the server layer) and by the Shorts grid (30 min, to avoid re-fetching
+// titles on every visit). Failures return null.
+async function playerDetails(id, cacheTtl = 30 * 60 * 1000) {
   const hit = shortMetaCache.get(id);
   if (hit && hit.expires > Date.now()) return hit.value;
   try {
@@ -103,14 +107,18 @@ async function shortDetails(id) {
     });
     if (!response.ok) return null;
     const details = (await response.json()).videoDetails;
-    if (!details) return null;
+    if (!details?.title) return null;
     const value = {
+      id,
       title: details.title || 'YouTube Short',
-      channel: details.author || 'YouTube Short',
+      channel: details.author || 'YouTube',
       views: Number(details.viewCount) || 0,
+      published: details.publishDate || '',
+      duration: Number(details.lengthSeconds) || 0,
+      thumb: `/api/thumb/${id}`,
     };
     if (shortMetaCache.size > 400) shortMetaCache.delete(shortMetaCache.keys().next().value);
-    shortMetaCache.set(id, { value, expires: Date.now() + 30 * 60 * 1000 });
+    shortMetaCache.set(id, { value, expires: Date.now() + cacheTtl });
     return value;
   } catch { return null; }
 }
@@ -136,26 +144,7 @@ async function reelSequence(continuation) {
 // A lightweight read of the public player response: enough for the watch
 // header while yt-dlp resolves the actual streams.
 export async function liteDetails(id) {
-  try {
-    const response = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
-      method: 'POST',
-      headers: YOUTUBE_HEADERS,
-      body: JSON.stringify({ context: CONTEXT, videoId: id, contentCheckOk: true, racyCheckOk: true }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) return null;
-    const details = (await response.json()).videoDetails;
-    if (!details?.title) return null;
-    return {
-      id,
-      title: details.title,
-      channel: details.author || 'YouTube',
-      views: Number(details.viewCount) || 0,
-      published: details.publishDate || '',
-      duration: Number(details.lengthSeconds) || 0,
-      thumb: `/api/thumb/${id}`,
-    };
-  } catch { return null; }
+  return playerDetails(id, 10 * 60 * 1000);
 }
 
 export async function shortsFeed(continuation) {
@@ -202,7 +191,7 @@ export async function shortsFeed(continuation) {
   // still show real titles and channels instead of placeholders.
   await Promise.all(videos.map(async video => {
     if (video.title !== 'YouTube Short') return;
-    const details = await shortDetails(video.id);
+    const details = await playerDetails(video.id);
     if (!details) return;
     video.title = details.title;
     video.channel = details.channel;

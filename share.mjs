@@ -14,7 +14,6 @@ const port = Number(process.env.PORT || 3210);
 const host = process.env.HOST || '0.0.0.0';
 const args = process.argv.slice(2);
 const providerArg = (args.find(value => value.startsWith('--provider='))?.split('=')[1] || process.env.TUNNEL_PROVIDER || 'auto').toLowerCase();
-const rotate = args.includes('--rotate');
 const accessFile = path.join(dataDir, 'access.json');
 const publicFile = path.join(dataDir, 'public-url.json');
 const tunnelLog = path.join(dataDir, 'tunnel.log');
@@ -37,7 +36,7 @@ async function ensureDirs() {
   await mkdir(toolsDir, { recursive: true });
 }
 
-async function accessCode(force = rotate) {
+async function accessCode(force = false) {
   if (process.env.ACCESS_CODE) return cleanCode(process.env.ACCESS_CODE);
   if (!force) {
     try {

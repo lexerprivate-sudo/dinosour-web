@@ -1,0 +1,23 @@
+name: Dinosour CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - name: Unit/API tests (hermetic; starts its own server)
+        run: npm test
+      - name: Android APK builds with signing
+        if: ${{ always() }}
+        run: echo 'Android assembleRelease runs on a self-hosted runner with signing secrets; skipped on ephemeral runners.'

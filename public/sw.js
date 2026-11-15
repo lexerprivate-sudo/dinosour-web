@@ -1,15 +1,19 @@
 // Dinosour service worker: network-first so a deployed update is picked up as
 // soon as the device is online, with a cached shell as the offline fallback.
 // API, media ranges and cross-origin requests always go straight to the network.
-const CACHE = 'dinosour-shell-v5';
-const SHELL = ['/', '/startup.js', '/native.js', '/app.js', '/style.css', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'dinosour-shell-v6';
+const SHELL = ['/', '/startup.js', '/native.js', '/app.js', '/style.css', '/manifest.webmanifest', '/icon.svg',
+  '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then(cache => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    // Pre-cache what we can; one missing asset must not prevent installation.
+    const results = await Promise.allSettled(SHELL.map(path => cache.add(path)));
+    const failed = SHELL.filter((_, i) => results[i].status === 'rejected');
+    if (failed.length) console.warn('[sw] pre-cache failed for:', failed.join(', '));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', event => {

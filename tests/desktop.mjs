@@ -36,7 +36,8 @@ try {
   assert.ok(trayState.hidden, 'closing while playing must hide the window to the tray, not quit');
   await assert.doesNotReject(fetch('http://127.0.0.1:43219/api/health', { signal: AbortSignal.timeout(5000) }));
   await app.close(); app = null;
-  await assert.rejects(fetch('http://127.0.0.1:43219/api/health', { signal: AbortSignal.timeout(3000) }));
+  const ping = await fetch('http://127.0.0.1:43219/api/ping', { signal: AbortSignal.timeout(3000) }).catch(() => null);
+  assert.equal(ping, null, 'backend must not answer after quit');
   app = await launch();
   const reopened = await app.firstWindow();
   await reopened.waitForFunction(() => window.__dinosourReady);

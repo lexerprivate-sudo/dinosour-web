@@ -24,3 +24,5 @@ REA-FINDINGS.md
 ghidra-*.log
 rea-*.json
 releases/
+*-upload-response.json
+short-info.json

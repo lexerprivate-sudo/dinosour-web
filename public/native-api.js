@@ -1,4 +1,4 @@
-import { search, shortsFeed, shortsPool } from './native/youtube-search.js';
+import { search, shortsFeed, shortsPool, liteDetails } from './native/youtube-search.js';
 import { selectAudioFormats, audioTrackGroups } from './native/audio-formats.js';
 
 const cache = new Map();
@@ -57,6 +57,13 @@ export async function handleRequest(url, signal) {
     let data;
     switch (url.pathname) {
       case '/api/ping': data = { ok: true, app: 'dinosour', standalone: true }; break;
+      case '/api/video-lite': {
+        const id = params.get('id');
+        if (!videoId(id)) return json({ error: 'Invalid YouTube video ID.' }, 400);
+        data = await cached(`video-lite:${id}`, 600000, () => liteDetails(id));
+        if (!data) return json({ error: 'This video is unavailable right now.' }, 404);
+        break;
+      }
       case '/api/network':
         data = { standalone: true, lan: [], publicUrl: null, accessRequired: false,
           inviteUrl: 'https://github.com/lexerprivate-sudo/dinosour-web/releases/latest/download/DinosourWeb.apk' };

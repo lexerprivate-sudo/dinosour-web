@@ -60,7 +60,7 @@ YouTube videos. No app account, subscription system, or embedded ad player.
 Double-click **Start Dinosour.cmd**, or run:
 
 ```powershell
-cd C:\Users\Rave\Desktop\dinosour
+cd C:\Users\Rave\Projects\dinosour
 npm start
 ```
 
@@ -104,7 +104,7 @@ npm run serve
 Double-click **Start Dinosour (Public).cmd**, or run:
 
 ```powershell
-cd C:\Users\Rave\Desktop\dinosour
+cd C:\Users\Rave\Projects\dinosour
 npm run share
 ```
 
@@ -217,7 +217,7 @@ invite link (refresh the in-app Share screen to show it).
 - Installable PWA: a web app manifest, maskable icons, and a network-first
   service worker. Chrome/Edge can install Dinosour from the address bar; iOS
   Safari can add it to the Home Screen.
-- Signed Android app (`DinosourWeb.apk`) with native server settings, a gear menu,
+- Signed Android app (`DinosourWeb.apk`) with a gear menu,
   in-app update checks, and full-screen Shorts playback.
 - Clean YouTube-style layout with a collapsible sidebar, compact search, and
   dark/light appearance (remembered on your device).
@@ -344,8 +344,8 @@ A signed standalone Android build is included:
   keeps sound running when the app is backgrounded or the screen is off; the
   notification's play/pause button toggles the video element.
 
-This app installs alongside the original Dinosour from the `tot` project.
-It has its own Android package and GitHub repository.
+This application is a separate fork of an earlier project. It has its own
+Android package and GitHub repository.
 
 The APK serves the bundled interface from a virtual HTTPS origin inside WebView.
 Search and caption requests use native HTTPS networking; metadata uses the
@@ -373,7 +373,7 @@ hidden.
 ### Rebuild the APK
 
 ```powershell
-cd C:\Users\Rave\Desktop\dinosour
+cd C:\Users\Rave\Projects\dinosour
 build-apk.cmd
 ```
 
@@ -465,38 +465,30 @@ time; the installed APK includes it, Python, and QuickJS.
 
 ## Studying YouTube
 
-The original REA capture is in `rea-youtube-evidence.json`. See
-`REA-FINDINGS.md` for observed facts, limitations, and the implementation decisions.
-The reel layout was measured from the live YouTube Shorts page with the same
-CDP/REA approach: the 9:16 video, the 48px action buttons outside it, the top
-overlay controls, and the bottom metadata gradient. Reference frames are saved as
-`test-results/youtube-shorts-reference-2.png` and `youtube-shorts-reference-dark.png`.
-
-Ghidra 12.2 from the official National Security Agency repository is installed at
-`C:\Users\Rave\Tools\ghidra_12.2_PUBLIC`. The release ZIP’s SHA-256 was verified
-against the official digest before extraction. Launch the GUI with:
-
-```powershell
-C:\Users\Rave\Tools\ghidra_12.2_PUBLIC\ghidraRun.bat
-```
-
-Or double-click `C:\Users\Rave\Tools\Open Ghidra.cmd`. The verified headless
-analysis logs are `ghidra-ytdlp-analysis.log` and `ghidra-ytdlp-report.log`.
-
-Ghidra is a native-code reverse-engineering tool. It can examine local compiled
-programs such as `yt-dlp.exe` and browser executables, but it cannot decompile
-YouTube’s server-side code or run on a remote website. YouTube’s browser client
-is minified JavaScript and is better studied with browser DevTools, CDP, and REA.
-See `GHIDRA-FINDINGS.md` for the installation check and the native-artifact study.
+Earlier investigations (REA capture files, Ghidra installation, reference frames)
+are kept as local machine-research artifacts, not part of the app. The shipped
+code reflects: anonymous `youtubei/v1/search` and Shorts sequence APIs, separate
+H.264/AAC tracks, and stacked player pairs for instant Shorts promotion. See
+`docs/ARCHITECTURE.md` and `docs/RELEASE.md` for how the app is built.
 
 ## Verification
 
-With the app running:
+What you need:
+
+- Node.js 22+ and `npm ci` once.
+- A server on port 3210 for networked suites: `node server.js` in another terminal
+  (tests also honor `TEST_URL`). Unit suites spawn their own server.
+- **System Chrome** (not bundled) for browser suites,
+- **FFmpeg** on PATH for media-related browser suites (watch-prefetch, features).
+- Internet access for anything that touches YouTube.
+- Internet and `npm ci` dependencies for build/release suites; a built APK for
+  `test:native` and a desktop install for `test:desktop`.
+
+Run, from the repository root:
 
 ```powershell
 npm run check
 npm test
-npm install
 npm run test:feed
 npm run test:recovery
 npm run test:shorts

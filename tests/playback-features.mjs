@@ -54,8 +54,11 @@ try {
   assert.equal(await page.locator('#quality').inputValue(), 'auto');
   assert.equal(qualityRequests[0], '480');
   // Simulate elapsed healthy playback without a 25-second wall-clock wait.
+  // Auto no longer up-switches mid-play; healthy playback must keep 480.
   await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 30000; });
-  await page.waitForFunction(() => document.querySelector('#video').src.includes('height=720'));
+  await page.waitForTimeout(2500);
+  const has720 = await page.evaluate(() => document.querySelector('#video').src.includes('height=720'));
+  assert.equal(has720, false, 'auto unexpectedly up-switched on healthy playback');
   await playing();
   await page.locator('#quality').selectOption({ label: '360p' });
   await playing();
