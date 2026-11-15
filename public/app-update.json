@@ -1,6 +1,6 @@
 {
-  "versionCode": 9,
-  "versionName": "1.2.3",
-  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.3/DinosourWeb.apk",
-  "notes": "Background playback that works as a real music session: lock-screen and notification show track title, channel and artwork with play/pause/next/previous controls, and the video track pauses in the background while the audio keeps playing (battery-friendly). Also includes the animated loading screens and faster home/Shorts loading. Install over your previous app to keep your library."
+  "versionCode": 10,
+  "versionName": "1.2.4",
+  "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.4/DinosourWeb.apk",
+  "notes": "Music-mode background playback continues (lockscreen controls, video track pauses, audio keeps playing). Plus: accessibility overhaul (landmarks, headings, focus-visible everywhere), faster CSP, shell precache v7 with all PWA icons, design-critic CSS fixes, and the swarm audit fixes across app code. Install over your previous app to keep your library."
 }

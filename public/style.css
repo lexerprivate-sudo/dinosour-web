@@ -58,6 +58,9 @@
   --overlay: #0000008f;
   --on-overlay: #f1f1f1;
   --on-overlay-dim: #aaa;
+  --spinner-track: #0f0f0f1f;
+  --spinner-arc: #0f0f0f;
+  --spinner-arc-dim: #0f0f0f80;
   --shadow-1: 0 4px 16px #0002;
   --shadow-2: 0 10px 32px #0003;
   --shadow-3: 0 16px 60px #0003;
@@ -357,7 +360,7 @@ body:has(#mini-player:not([hidden])) main { padding-bottom: 330px; }
   position: relative;
   width: 32px;
   height: 32px;
-  border: 3px solid #ffffff2e;
+  border: 3px solid var(--spinner-track);
   border-radius: 50%;
   animation: spinner-breathe 2.6s ease-in-out infinite;
 }
@@ -367,8 +370,8 @@ body:has(#mini-player:not([hidden])) main { padding-bottom: 330px; }
   inset: -3px;
   border-radius: 50%;
   border: 3px solid transparent;
-  border-top-color: #fff;
-  border-right-color: #ffffff73;
+  border-top-color: var(--spinner-arc);
+  border-right-color: var(--spinner-arc-dim);
   animation: spinner-arc 1.5s cubic-bezier(.45,.1,.35,.9) infinite;
   will-change: transform;
 }

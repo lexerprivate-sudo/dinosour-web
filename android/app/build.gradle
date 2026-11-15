@@ -27,8 +27,8 @@ android {
         applicationId 'com.dinosour.web'
         minSdk 24
         targetSdk 34
-        versionCode 9
-        versionName '1.2.3'
+        versionCode 10
+        versionName '1.2.4'
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
         }
