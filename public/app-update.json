@@ -1,6 +1,1 @@
-{
-    "versionCode":  11,
-    "versionName":  "1.2.5",
-    "apkUrl":  "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.5/DinosourWeb.apk",
-    "notes":  "Music session fix (lockscreen transports stable) + Android bridge locked to the app origin + background audio reliability polish. Install over your previous app to keep your library."
-}
+{ "versionCode": 12, "versionName": "1.2.6", "apkUrl": "https://github.com/lexerprivate-sudo/dinosour-web/releases/download/v1.2.6/DinosourWeb.apk", "notes": "Background playback fix, origin-locked bridge, polished loading progress, stale-watch-prefetch bug fixed, captions UI tidier. Install over your previous app to keep your library." }
