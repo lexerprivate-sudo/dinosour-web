@@ -622,7 +622,10 @@ public class MainActivity extends Activity {
             customViewCallback = callback;
             customView.setBackgroundColor(Color.BLACK);
             root.addView(customView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            webView.setVisibility(View.GONE);
+            // INVISIBLE, not GONE: the custom view already paints black, and some
+            // OEM WebView builds tear down the video surface when the WebView is
+            // GONE — producing a black frame and a cold rebuffer on exit-fullscreen.
+            webView.setVisibility(View.INVISIBLE);
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             getWindow().getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
@@ -782,9 +785,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        // Background audio keeps the page running while the service is active;
-        // pausing the WebView would stop the sound the user asked to keep.
-        if (webView != null && !backgroundPlaying) webView.onPause();
+        // Do not call webView.onPause(): it suspends the media pipeline and
+        // timers, and several WebView builds fail to re-prime buffers on
+        // resume — the page looks "stuck loading" after a notification shade
+        // or split-screen round-trip. The foreground service handles battery;
+        // nothing here should suspend playback.
         super.onPause();
     }
 

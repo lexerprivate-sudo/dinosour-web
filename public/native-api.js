@@ -33,12 +33,16 @@ export function normalizeVideo(info) {
   const audio = selectAudioFormats(formats);
   if (!qualities.length || (qualities.every(q => q.separateAudio) && !audio.length)) throw new Error('No compatible public stream is available for this video.');
   const captions = [];
+  const englishCaption = language => /^en([-_][a-z0-9-]*)?$/i.test(String(language || ''));
   for (const [automatic, tracks] of [[false, info.subtitles || {}], [true, info.automatic_captions || {}]]) {
     for (const [language, entries] of Object.entries(tracks)) {
+      if (!englishCaption(language)) continue; // English tracks only
       if (captions.some(c => c.language === language)) continue;
       const format = entries.find(f => f.ext === 'vtt' && /^https:\/\/(?:www\.)?youtube\.com\//.test(f.url || ''));
       if (format) captions.push({ language, label: `${entries[0]?.name || language}${automatic ? ' (Auto)' : ''}`, src: format.url });
+      if (captions.length >= 4) break;
     }
+    if (captions.length >= 4) break;
   }
   return {
     id: info.id, title: info.title || 'YouTube video', channel: info.uploader || info.channel || 'YouTube',

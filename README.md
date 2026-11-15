@@ -307,8 +307,10 @@ implementation of its native transport.
 - **Audio language:** choose English (preferred), Original, or an available
   language track. The preference is remembered and applies to Shorts too.
   Recovery uses alternatives in the same selected language.
-- **Captions:** select available creator or automatic subtitles in the Captions
-  menu. Off/language preference is remembered; unavailable tracks are disabled.
+- **Captions:** English captions only — creator or automatic tracks in the
+  Captions menu (English variants, with manual tracks offered before
+  auto-generated ones). Off/language preference is remembered; unavailable
+  tracks are disabled.
 - **Picture-in-picture / Mini-player:** native PiP on supported browsers, with
   an in-app floating player for WebViews. Browse Home/Search/Library without
   restarting the video. Use “Return to video” or × to restore/close it.
@@ -319,6 +321,10 @@ implementation of its native transport.
   position, speed, volume, language, and captions rather than rebuilding the page.
 - **Buffer priority:** speculative prefetch pauses when the active video has
   little buffered data or stalls; audio buffering can hold the video in sync.
+  During playback the warmed next-video pair deliberately yields to the current
+  stream, dropping its media `preload` to `none` while the active video is
+  starved (playing, not yet fully ready, under 10 s buffered ahead) and
+  returning to `auto` once the buffer recovers or playback pauses.
 
 - Hover, keyboard focus, or touch-down on a video prepares one upcoming video
   and its audio. Opening it reuses the buffered media elements.
@@ -328,7 +334,10 @@ implementation of its native transport.
 - Speculative loading is skipped on Data Saver/2G connections, cancelled when
   leaving the page, and the warmed player expires after three minutes.
 - While playback starts, the thumbnail and a loading message replace the blank
-  player. Later buffering uses a small indicator over the last video frame.
+  player; the message carries a progress ring whose percentage is driven by the
+  media the browser reports as buffered ahead of the play position (capped at
+  45 s), not by elapsed time. Later buffering uses a small indicator over the
+  last video frame.
 - Saved-position playback works with warmed players; playback controls wrap on
   narrow phone screens.
 

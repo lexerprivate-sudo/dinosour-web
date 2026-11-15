@@ -383,8 +383,11 @@ async function getVideo(id) {
       ...group, tickets: tracks.map(f => ticket(f, f.http_headers || info.http_headers)),
     }));
     const captions = [];
+    const englishCaption = language => /^en([-_][a-z0-9-]*)?$/i.test(String(language || ''));
     for (const [automatic, tracks] of [[false, info.subtitles || {}], [true, info.automatic_captions || {}]]) {
       for (const [language, formats] of Object.entries(tracks)) {
+        // English tracks only. Manual captions are offered before auto-generated.
+        if (!englishCaption(language)) continue;
         if (captions.some(c => c.language === language)) continue;
         const format = formats.find(f => f.ext === 'vtt' && f.url);
         if (!format) continue;
@@ -394,7 +397,9 @@ async function getVideo(id) {
         captionTickets.set(token, { url: url.href, expires: Date.now() + 60 * 60 * 1000 });
         captions.push({ language, label: `${formats[0]?.name || language}${automatic ? ' (Auto)' : ''}`, src: `/api/captions/${token}` });
         if (captionTickets.size > 3000) captionTickets.delete(captionTickets.keys().next().value);
+        if (captions.length >= 4) break;
       }
+      if (captions.length >= 4) break;
     }
     const heights = new Set();
     const qualities = video.filter(f => !heights.has(qualityOf(f)) && heights.add(qualityOf(f))).map(f => ({
@@ -428,7 +433,13 @@ async function serveStream(req, res, url) {
     const item = tickets.get(url.pathname.slice('/api/stream/'.length));
     if (!item || item.expires <= Date.now()) return json(res, 410, { error: 'Playback link expired. Reopen the video.' });
     if (req.headers.range && !/^bytes=\d*-\d*$/.test(req.headers.range)) return json(res, 416, { error: 'Invalid range.' });
-    if (await serveChunk(req, res, item)) return;
+    try {
+      if (await serveChunk(req, res, item)) return;
+    } catch (error) {
+      // Chunk fetch failed after retries; nothing has been written to res yet.
+      console.error(`Media chunk failed; range=${req.headers.range || 'none'}; ${error?.code || error?.name || 'error'}`);
+      return json(res, 502, { error: 'The video stream was interrupted. Please retry.' });
+    }
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     const deadline = setTimeout(() => controller.abort(), 45000);
@@ -444,6 +455,12 @@ async function serveStream(req, res, url) {
       }
     } finally { clearTimeout(deadline); }
     if (!upstream || ![200, 206, 416].includes(upstream.statusCode)) {
+      if (failure === 429 || failure === 403) {
+        // Rate-limited/refused upstream: 503 + Retry-After so Chrome backs off instead of hammering.
+        console.error(`Media upstream refused (${failure}); range=${req.headers.range || 'none'}`);
+        res.setHeader('retry-after', '5');
+        return json(res, 503, { error: 'The video host is rate limiting requests. Retrying shortly.' });
+      }
       console.error(`Media upstream failed after retries${failure ? ` (${failure})` : ''}.`);
       return json(res, 502, { error: 'YouTube refused the media stream. Reopen the video to retry.' });
     }

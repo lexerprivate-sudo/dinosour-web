@@ -35,6 +35,7 @@ export function createMediaChunks({ open, chunkSize = 1024 * 1024, maxBytes = 64
           if (length !== Number(range[2]) - start + 1) throw new Error('Incomplete media chunk');
           const result = { body: Buffer.concat(buffers), start, end: Number(range[2]),
             total: Number(range[3]), type: response.headers['content-type'] || 'application/octet-stream' };
+          // Invariant: only fully validated chunks enter the shared LRU cache; failed attempts are never cached.
           cache.set(key, result); bytes += length;
           while (bytes > maxBytes && cache.size) {
             const oldest = cache.keys().next().value;

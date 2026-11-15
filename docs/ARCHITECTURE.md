@@ -47,6 +47,19 @@ This document is the map a new contributor needs before touching any of it.
 6. `cleanup()` unloads everything on route change; `AbortController` cancels
    in-flight fetches; `dispose` flips a flag every async callback re-checks.
 
+`media-chunks.js` serves `/api/stream/<ticket>` media as bounded 1 MB byte-range
+windows against the upstream CDN (range-less requests fall back to the open
+upstream path in `server.js`; the chunked path caps every read at 1 MB), with one
+chunk of read-ahead per active track (at most two speculative requests total) and
+a shared 64 MB LRU cache that holds only fully validated chunks. The bound is
+deliberate: YouTube's CDN edges throttle open-ended downloads and extra concurrent
+connections from one IP, so the proxy keeps its per-IP concurrency footprint small.
+The same per-IP budget is the designed reason for the client-side yield during
+playback: while the active video is starved (playing, not yet fully ready, under
+10 s of buffer ahead), the warmed next-video pair sets `preload` to `none` instead
+of competing with the current stream for CDN connections, and resumes once the
+buffer recovers or playback pauses.
+
 ## Routing & focus
 
 `route()` is the only route entry point (hash change / clicks / `route(true)`). It

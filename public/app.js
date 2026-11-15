@@ -975,7 +975,7 @@ async function watch(id, current, controller, refresh) {
   const loading = document.createElement('div');
   loading.className = 'watch-loading';
   loading.setAttribute('role', 'status');
-  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><svg class="watch-progress" viewBox="0 0 80 80" role="progressbar" aria-label="Buffering" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><circle class="watch-progress-track" cx="40" cy="40" r="34"/><circle class="watch-progress-fill" cx="40" cy="40" r="34"/><text class="watch-progress-pct" x="40" y="46" text-anchor="middle">0</text></svg><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
+  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><svg class="watch-progress" viewBox="0 0 80 80" role="progressbar" aria-label="Buffering" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><circle class="watch-progress-track" cx="40" cy="40" r="34"/><circle class="watch-progress-fill" cx="40" cy="40" r="34"/><text class="watch-progress-pct" x="40" y="40" text-anchor="middle">0</text></svg><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
   video.parentElement.append(loading);
   const bufferHint = document.createElement('div');
   bufferHint.className = 'watch-buffer-hint'; bufferHint.hidden = true;
@@ -984,6 +984,7 @@ async function watch(id, current, controller, refresh) {
   let waitingTimer, stallTimer, hasFrame = false, switching = false, playingIntent = true, audioBuffering = false, ignorePause = false;
   let reloadStreams, captionRequest = 0, captionBlob = null;
   let metadataMs = 0, firstFrameMs = 0, rebuffers = 0, recoveries = 0, qualityLoads = 0, statsTimer = null;
+  let consecutiveStalls = 0; // consecutive 8s stall-timer fires with no playback resume
   const frozenFrame = document.createElement('canvas');
   frozenFrame.className = 'quality-frame'; frozenFrame.hidden = true;
   video.parentElement.append(frozenFrame);
@@ -1012,10 +1013,12 @@ async function watch(id, current, controller, refresh) {
     if (ring) ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
   };
   const bufferTimer = setInterval(bufferFill, 200);
-  // Watchdog: if within 25s of opening the page the video has not advanced past
-  // its first frame and no retry is in flight, give the user a way forward.
+  // Watchdog: if within 25s of opening the page the video has not advanced to
+  // a playable state and no retry is in flight, give the user a way forward.
+  // Based on first-frame/readyState, not on `paused` — a video whose play was
+  // honoured but never gets a frame is the "keeps loading forever" case.
   const watchdog = setTimeout(() => {
-    if (disposed || firstFrameMs || switching || !video.paused) return;
+    if (disposed || firstFrameMs || switching || video.readyState >= 2) return;
     showError('The video did not start in time. It may be region-locked, unavailable, or your network is too slow.');
   }, 25000);
 
@@ -1099,7 +1102,12 @@ async function watch(id, current, controller, refresh) {
   };
   const retryPlayback = async message => {
     if (disposed || retrying) return;
-    if ((autoRetryCount.get(id) || 0) >= 2) return showError(`${message} Retry to request a fresh stream.`);
+    if ((autoRetryCount.get(id) || 0) >= 2) {
+      // Terminal state: keep the message, but guarantee the overlay/hint are hidden
+      // and showError's Retry button is the visible way forward.
+      loading.hidden = true; bufferHint.hidden = true;
+      return showError(`${message} Retry to request a fresh stream.`);
+    }
     retrying = true; recoveries++;
     autoRetryCount.set(id, (autoRetryCount.get(id) || 0) + 1);
     const position = video.currentTime;
@@ -1397,7 +1405,7 @@ async function watch(id, current, controller, refresh) {
     video.onplaying = () => {
       switching = false; playbackBusy = false; clearTimeout(stallTimer); clearTimeout(watchdog);
       if (!firstFrameMs) firstFrameMs = performance.now() - watchStarted;
-      bufferHint.textContent = 'Buffering…'; hideLoading(); clearStatus(); playAudio(); healthySince = Date.now();
+      bufferHint.textContent = 'Buffering…'; hideLoading(); clearStatus(); playAudio(); healthySince = Date.now(); consecutiveStalls = 0;
     };
     audio.onplaying = () => { $('#unmute')?.remove(); };
     audio.onwaiting = () => {
@@ -1425,6 +1433,8 @@ async function watch(id, current, controller, refresh) {
       clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         if (disposed || !playingIntent || video.readyState >= 3) return;
+        consecutiveStalls += 1;
+        if (consecutiveStalls >= 3) return showError('Playback is too stalled on this connection — try a lower quality manually or retry.');
         const lower = info.qualities.map((q, i) => ({ ...q, i })).filter(q => q.height < info.qualities[selectedQuality].height).sort((a, b) => b.height - a.height)[0];
         if (autoMode && lower && Date.now() - lastQualityChange > 4000) {
           loadQuality(lower.i, video.currentTime, true);
@@ -1470,6 +1480,15 @@ async function watch(id, current, controller, refresh) {
       // Once this video reaches a healthy buffer, hold a warm pair ready for
       // the next queue/related video. prepareWatch dedupes, so a shifted queue re-warms.
       warmNextWatch(id);
+      // Yield to the current stream. YouTube throttles extra concurrent
+      // connections from one IP, so while the active video is starved (or not
+      // playing yet) the warm pair stops downloading instead of stealing its
+      // budget; it resumes once the main buffer recovers or when paused.
+      if (warmWatch) {
+        const low = !video.paused && video.readyState < 4 && playbackBufferAhead < 10;
+        const preload = low ? 'none' : 'auto';
+        if (warmWatch.video.preload !== preload) { warmWatch.video.preload = preload; warmWatch.audio.preload = preload; }
+      }
       // Progressive MP4 sources cannot switch quality seamlessly. Raising the
       // quality here discarded a healthy buffer every 25 seconds. Keep Auto
       // stable; its stall handler can still lower quality when necessary.
