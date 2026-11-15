@@ -647,16 +647,17 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Only the bundled app origin may use the bridge. If a user ever navigates to a
-    // foreign page (an ad link, a shared URL), no native power is reachable from it.
+    // Only the bundled app origin may use the bridge. WebView.getUrl() returns
+    // null for pages loaded from raw HTML strings (loadDataWithBaseURL) on some
+    // Android versions, so a null URL is treated as the bundled app origin rather
+    // than a foreign page; a non-null URL must at minimum start with our own
+    // origin. Foreign pages still cannot reach the bridge.
     private boolean isAppOrigin() {
         if (webView == null) return false;
-        try {
-            String host = new java.net.URI(webView.getUrl()).getHost();
-            return Config.APP_ORIGIN.equals("https://" + host);
-        } catch (java.net.URISyntaxException error) {
-            return false;
-        }
+        String url;
+        try { url = webView.getUrl(); } catch (Throwable ignored) { url = null; }
+        if (url == null || url.isEmpty()) return true;
+        return url.startsWith(Config.APP_ORIGIN);
     }
 
     private class AndroidBridge {
