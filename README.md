@@ -194,8 +194,9 @@ invite link (refresh the in-app Share screen to show it).
   Progress bars also appear on matching video cards.
 - **Search upgrades:** suggestions from YouTube as you type, recent searches,
   duration filters (under 4 minutes, 4-20 minutes, over 20 minutes), and sorting
-  by relevance, newest, most viewed, shortest, or longest. Filters and recent
-  searches are remembered on the device.
+  by relevance, newest, most viewed, shortest, or longest. A fresh search from
+  the search box resets duration/sort to relevance so you always see results;
+  recent searches are kept on the device.
 - **Playback diagnostics:** **Stats for nerds** shows startup timing, quality,
   buffer-ahead, rebuffer/recovery counts, dropped frames, audio/caption source,
   network estimate, and player state, updating once a second.
@@ -461,14 +462,9 @@ users must uninstall and reinstall.
 The Android build uses youtubedl-android 0.18.1 (GPL-3.0). See
 `android/THIRD_PARTY_NOTICES.md` for upstream source and runtime notices.
 Gradle downloads and verifies the pinned yt-dlp 2026.10.26 executable at build
-time; the installed APK includes it, Python, and QuickJS.
-
-## How it works
-
-The shipped code reflects: anonymous YouTube InnerTube calls (`youtubei/v1/search`,
-the Shorts sequence endpoint), separate H.264/AAC tracks, bounded 1 MB media chunks
-through a local byte-range proxy with one chunk read-ahead, and stacked player pairs
-for instant Shorts promotion. `docs/ARCHITECTURE.md` maps every flow.
+time; the installed APK includes it, Python, and QuickJS. See
+`docs/ARCHITECTURE.md` for how the pieces connect, and `docs/RELEASE.md` for how
+releases are cut.
 
 ## Verification
 

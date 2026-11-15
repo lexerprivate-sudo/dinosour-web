@@ -48,6 +48,13 @@ const secureEqual = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 };
+// A browser forbids cross-site <img>/<script> requests to /api/* endpoints
+// via Sec-Fetch-Site. Reject anything that is not an explicit same-site
+// request. Requests without the header are allowed (curl, same as before).
+const sameSiteFetch = req => {
+  const site = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+  return !site || ['same-origin', 'same-site', 'first-party', 'none'].includes(site);
+};
 let accessCache = { at: 0, code: normalizeAccess(process.env.ACCESS_CODE) };
 async function accessCode() {
   if (process.env.ACCESS_CODE !== undefined) return normalizeAccess(process.env.ACCESS_CODE);
@@ -77,12 +84,39 @@ const privateAddress = value => {
     /^192\.168\./.test(address) || /^172\.(1[6-9]|2\d|3[01])\./.test(address) ||
     /^169\.254\./.test(address) || /^fe80:/i.test(address) || /^f[cd][0-9a-f]{2}:/i.test(address);
 };
+const isLoopback = value => {
+  const address = String(value || '').replace(/^::ffff:/i, '').toLowerCase();
+  if (!isIP(address)) return false;
+  return /^127\./.test(address) || address === '::1';
+};
 const privateHost = value => {
   const raw = String(value || '').split(',')[0].trim().toLowerCase();
   if (!raw) return false;
   let hostname;
   try { hostname = new URL(`http://${raw}`).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
   return hostname === 'localhost' || hostname.endsWith('.local') || privateAddress(hostname);
+};
+// Simple rate limit on access-code verification. Failures are remembered per
+// remote address; after UNLOCK_MAX_FAILURES wrong codes inside the window the
+// /unlock and ?access= paths are refused. Cookie auth is untouched.
+const UNLOCK_MAX_FAILURES = 5;
+const UNLOCK_WINDOW_MS = 5 * 60 * 1000;
+const unlockFailures = new Map();
+const unlockThrottled = ip => {
+  const now = Date.now();
+  const entry = unlockFailures.get(ip);
+  if (entry && entry.resetAt <= now) unlockFailures.delete(ip);
+  else if (entry && entry.count >= UNLOCK_MAX_FAILURES) return true;
+  return false;
+};
+const recordUnlockFailure = ip => {
+  const now = Date.now();
+  let entry = unlockFailures.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + UNLOCK_WINDOW_MS };
+    unlockFailures.set(ip, entry);
+  }
+  entry.count += 1;
 };
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -148,14 +182,21 @@ async function allowRequest(req, res, url, code) {
     (!configuredHost || requestHost.toLowerCase() !== configuredHost);
   if (privateClient) return true;
   if (url.pathname === '/unlock') {
+    const remoteAddress = String(req.socket.remoteAddress || '').replace(/^::ffff:/i, '');
+    if (unlockThrottled(remoteAddress)) {
+      res.writeHead(429, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self'", 'x-frame-options': 'SAMEORIGIN', 'retry-after': '300' });
+      res.end(req.method === 'HEAD' ? undefined : unlockPage('/', 'Too many wrong codes. Wait five minutes and try again.'));
+      return false;
+    }
     const supplied = normalizeAccess(url.searchParams.get('code'));
     if (!supplied) {
-      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self'", 'x-frame-options': 'SAMEORIGIN' });
       res.end(req.method === 'HEAD' ? undefined : unlockPage(url.searchParams.get('next') || '/'));
       return false;
     }
     if (!secureEqual(accessHash(supplied), accessHash(code))) {
-      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      recordUnlockFailure(remoteAddress);
+      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self'", 'x-frame-options': 'SAMEORIGIN' });
       res.end(req.method === 'HEAD' ? undefined : unlockPage(url.searchParams.get('next') || '/', 'That access code is not correct.'));
       return false;
     }
@@ -166,21 +207,31 @@ async function allowRequest(req, res, url, code) {
     return false;
   }
   const queryAccess = normalizeAccess(url.searchParams.get('access'));
-  if (queryAccess && secureEqual(accessHash(queryAccess), accessHash(code))) {
-    setAccessCookie(req, res, code);
-    url.searchParams.delete('access');
-    res.writeHead(303, { location: url.pathname + (url.search || ''), 'cache-control': 'no-store' });
-    res.end();
-    return false;
+  if (queryAccess) {
+    const remoteAddress2 = String(req.socket.remoteAddress || '').replace(/^::ffff:/i, '');
+    if (unlockThrottled(remoteAddress2)) {
+      json(res, 429, { error: 'Too many wrong codes. Wait five minutes and try again.' });
+      return false;
+    }
+    if (secureEqual(accessHash(queryAccess), accessHash(code))) {
+      setAccessCookie(req, res, code);
+      url.searchParams.delete('access');
+      res.writeHead(303, { location: url.pathname + (url.search || ''), 'cache-control': 'no-store' });
+      res.end();
+      return false;
+    }
+    recordUnlockFailure(remoteAddress2);
   }
   if (secureEqual(cookie(req, 'dinosour_access'), accessHash(code))) return true;
   if (url.pathname === '/api/ping' || url.pathname === '/app-update.json' || url.pathname === '/download/DinosourWeb.apk' ||
-      url.pathname === '/icon.svg' || url.pathname === '/icons/favicon-32.png' || url.pathname === '/manifest.webmanifest') return true;
+      url.pathname === '/icon.svg' || url.pathname === '/icons/favicon-32.png' || url.pathname === '/icons/icon-192.png' ||
+      url.pathname === '/icons/icon-512.png' || url.pathname === '/icons/apple-touch-icon.png' || url.pathname === '/icons/icon-maskable-512.png' ||
+      url.pathname === '/manifest.webmanifest') return true;
   if (url.pathname.startsWith('/api/')) {
     json(res, 401, { error: 'This server needs its access code. Open the invite link again.' });
   } else if (wantsHtml(req)) {
     const next = url.pathname + url.search;
-    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'; form-action 'self'; base-uri 'self'", 'x-frame-options': 'SAMEORIGIN' });
     res.end(req.method === 'HEAD' ? undefined : unlockPage(next));
   } else {
     json(res, 401, { error: 'Access code required.' });
@@ -449,26 +500,37 @@ const server = http.createServer(async (req, res) => {
   let url;
   try { url = new URL(req.url, `http://127.0.0.1:${port}`); }
   catch { return json(res, 400, { error: 'Invalid request URL.' }); }
+  // Defense-in-depth against CSRF-style blind GET abuse from other web origins.
+  if (url.pathname.startsWith('/api/') && !sameSiteFetch(req)) {
+    return json(res, 403, { error: 'Cross-site API calls are not allowed.' });
+  }
   try {
     const code = await accessCode();
     if (!await allowRequest(req, res, url, code)) return;
     if (url.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, app: 'dinosour', host: os.hostname() });
+      return json(res, 200, { ok: true, app: 'dinosour' });
     }
     if (url.pathname === '/api/network') {
+      // Never hand the invite code to an unauthenticated LAN browser: the
+      // code is the entire lock on public sharing. Only loopback callers may
+      // read it; anyone else must already prove it (code/cookie).
       const publicInfo = await publicDetails();
       const origin = requestOrigin(req);
       const base = publicInfo?.url || origin;
-      return json(res, 200, {
+      const loopback = isLoopback(req.socket.remoteAddress);
+      const authorized = loopback || (code && secureEqual(cookie(req, 'dinosour_access'), accessHash(code)));
+      const response = {
         lan: lanAddresses(),
         publicUrl: publicInfo?.url || null,
         publicProvider: publicInfo?.provider || null,
         publicStable: publicInfo?.stable === true,
         currentOrigin: origin,
         accessRequired: !!code,
-        accessCode: code || null,
-        inviteUrl: base ? (code ? `${base}/unlock?code=${encodeURIComponent(code)}&next=/` : `${base}/`) : null,
-      });
+        accessCode: authorized ? code || null : null,
+        inviteUrl: authorized ? (base ? (code ? `${base}/unlock?code=${encodeURIComponent(code)}&next=/` : `${base}/`) : null) : null,
+      };
+      if (!authorized) { delete response.accessCode; delete response.inviteUrl; }
+      return json(res, 200, response);
     }
     if (url.pathname === '/api/suggest') {
       const q = (url.searchParams.get('q') || '').trim().slice(0, 120);
@@ -619,8 +681,11 @@ const server = http.createServer(async (req, res) => {
       'content-length': body.length,
       'cache-control': file[2],
       // A conservative CSP: the app uses no remote code; images come from us or
-      // i.ytimg.com; media flows same-origin or via the localhost loopback media port.
-      ...(isHtml ? { 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ytimg.com data:; media-src 'self' https://*.googlevideo.com http://127.0.0.1:* http://localhost:* blob:; connect-src 'self' blob:; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" } : {}),
+      // i.ytimg.com; media flows same-origin ('self'), the localhost loopback media
+      // port (Electron/LAN), arbitrary LAN origins when dev-sharing, the GoogleVideo
+      // CDN, or blob: (caption <track>). LAN media on port+1 is covered by http:
+      // because plain http has no mixed-content risk and https still disallows it.
+      ...(isHtml ? { 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ytimg.com data:; media-src 'self' https://*.googlevideo.com http://127.0.0.1:* http://localhost:* http: blob:; connect-src 'self' blob:; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" } : {}),
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch (error) {
@@ -637,8 +702,9 @@ const mediaServer = http.createServer(async (req, res) => {
   let url;
   try { url = new URL(req.url, `http://127.0.0.1:${mediaPort}`); }
   catch { return json(res, 400, { error: 'Invalid request URL.' }); }
+  if (!url.pathname.startsWith('/api/stream/')) return json(res, 404, { error: 'Not found.' });
+  if (!sameSiteFetch(req)) return json(res, 403, { error: 'Cross-site API calls are not allowed.' });
   try {
-    if (!url.pathname.startsWith('/api/stream/')) return json(res, 404, { error: 'Not found.' });
     if (!await allowRequest(req, res, url, await accessCode())) return;
     await serveStream(req, res, url);
   } catch {

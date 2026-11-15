@@ -131,7 +131,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({ path: 'test-results/playback-features-mobile.png', fullPage: true });
   assert.deepEqual(errors, []);
-  console.log('PASS: auto upgrade, manual quality, persisted audio language, captions, in-place recovery, PiP fallback, mini-player continuity, queue ordering/removal/autoplay, and mobile layout.');
+  console.log('PASS: auto quality stays on the current rung, manual quality switches work, audio language persists, captions load, feature-video recovery works, PiP/DWM fallback works, queue ordering/removal/autoplay works, mobile layout works.');
 } catch (error) {
   console.error('Page errors:', errors);
   console.error(await page.evaluate(() => window.endLog));

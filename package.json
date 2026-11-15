@@ -12,7 +12,7 @@
     "share": "node share.mjs",
     "share:stable": "node share.mjs --provider=tailscale",
     "share:rotate": "node share.mjs --rotate-code",
-    "check": "node --check server.js && node --check youtube-search.js && node --check public/startup.js && node --check public/app.js && node --check public/native.js && node --check public/native-api.js && node --check public/sw.js",
+    "check": "npx eslint public/ && node --check server.js && node --check youtube-search.js && node --check public/startup.js && node --check public/app.js && node --check public/native.js && node --check public/native-api.js && node --check public/sw.js && node --check media-chunks.js && node --check audio-formats.js",
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser.mjs",
     "test:pwa": "node tests/pwa-browser.mjs",
@@ -37,7 +37,8 @@
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "electron": "45.3.2",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "eslint": "^10.15.0"
   },
   "license": "GPL-3.0-only"
 }

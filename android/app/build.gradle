@@ -9,8 +9,10 @@ if (keystorePropertiesFile.exists()) {
 }
 // Release builds must never fall back to debug signing. An accidentally
 // debug-signed APK would be rejected by Android as an update for anyone who
-// installed a signed release, and would silently strand them there.
-if (gradle.taskGraph.hasTask('assembleRelease') || gradle.taskGraph.hasTask('bundleRelease')) {
+// installed a signed release, and would silently strand them there. Ask the
+// requested task names (evaluated at configuration time, when the plugin list is fixed).
+def requestedTasks = gradle.startParameter.taskNames.collect { it.split(':').last() }
+if (requestedTasks.any { it in ['assembleRelease', 'bundleRelease'] }) {
     if (!keystorePropertiesFile.exists()) {
         throw new GradleException('keystore.properties is missing; refusing to build a release APK (debug signing fallback disabled).')
     }

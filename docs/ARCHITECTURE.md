@@ -8,24 +8,23 @@ This document is the map a new contributor needs before touching any of it.
 ## Layout
 
 - `server.js` — the only backend. Serves the SPA (`public/index.html` + `/app.js`),
-  search/suggest/captions/stream proxies, and media chunking (`media-chunks.js`).
-  Static routes are also declared in `server.js` (`staticFiles` map); **their count
-  must stay in sync with `public/sw.js`'s `SHELL` and, for icons, `manifest.webmanifest`**.
+  search/suggest/captions/stream proxies, media chunking (`media-chunks.js`), and the
+  static `files` map. The service worker's `SHELL` in `public/sw.js` must reference
+  every file present in that map and in `manifest.webmanifest` for offline use.
 - `youtube-search.js` — anonymous YouTube access (InnerTube). Shared by `server.js`.
   No API key, account or cookie other than consent markers.
 - `media-chunks.js` — bounded 1 MB chunked reads through the byte-range proxy with
   one chunk read-ahead and a 64 MB LRU. Suffix/signed range quirks live here; do not
   open-code ranges elsewhere.
-- `audio-formats.js` — `selectAudioFormats`, `audioTrackGroups`, `preferredAudio`
-  — shared by Node and the Android WebView (assets include it as
-  `native/audio-formats.js`). Signed media URLs carry an opaque 24-byte ticket
-  issued by `server.js` (see "Request lifecycle").
+- `audio-formats.js` — `selectAudioFormats`, `audioTrackGroups` — shared by Node
+  and the Android WebView (assets include it as `native/audio-formats.js`). Media URLs
+  carry an opaque 24-byte ticket issued by `server.js` (see "Request lifecycle").
 - `public/app.js` — the single-page client. No build step; plain ES modules inline.
 - `desktop/main.cjs` — Electron main. Forks `server.js` as a child (`ELECTRON_RUN_AS_NODE=1`)
-  on fixed ports 43219/43220, starts the tray updater and (optionally) the background
-  media session mode.
+  on fixed ports 43219/43220. The tray icon is created lazily on a window close with
+  media playing; the GitHub-releases-based updater lives in the same file.
 - `android/` — APK builder. Copies `public/` into APK assets via `bundleWebAssets`
-  (`android/app/build.gradle`). Android needs no network permission to host its UI;
+  (`android/app/build.gradle`). The APK declares INTERNET and related permissions;
   YouTube traffic goes through `NativeEngine.java` (youtubedl-android).
 
 ## Request lifecycle (playback)
@@ -61,7 +60,7 @@ landmark). `#search` always mirrors the hash via `updateSearch()`. `el.search` i
 | `cached()` | `server.js` | varies per route (5/2/10/30 min) | server responses |
 | `infoCache` | client `app.js` | 2 min / — | `/api/video` responses (the whole page needs) |
 | `shortInfo` in-flight dedupe | client `app.js` | — | shared promise per video id |
-| `shortMetaCache` | `youtube-search.js` | 30 min / — | Shorts grid title/channel/views |
+| `shortMetaCache` | `youtube-search.js` | 30 min (Shorts grid) / 10 min (video-lite) / — | Shorts grid titles, channels, views; `/api/video-lite` header; FIFO at 400 |
 | boot cache | client `app.js` | none (last first page) | feed tiles for instant paint |
 | `dinosour.restart.*`, `dinosour.feed.v1:*` | client `app.js` | session / by hand | resume position / boot tiles |
 | tickets (`tickets`, `captionTickets`) | `server.js` | FIFO eviction (stream 6h / caption 1h) | signed URLs |
@@ -73,33 +72,38 @@ insertion order.
 
 ## Background audio (music mode)
 
-- Android: 1.2.3+ — the app ships an **ACT Lock-Screen music session** via
+- Android: 1.2.3+ — the app ships a lock-screen music session via
   `navigator.mediaSession` (WebView→OS bridge). `visibilitychange → hidden` pauses
   the **video** track and keeps the separate **audio** track playing
   (battery/background-limit hygiene); on visible it re-seeks and resumes. A
   foreground `BackgroundAudioService` (`mediaPlayback` FGS type) keeps the process
   alive when the app is backgrounded. `POST_NOTIFICATIONS` is requested at
   runtime on Android 13+.
-- Desktop: closing/minimize while media is active hides the window to the tray
+- Desktop: closing the window with media active hides it to the tray
   (`hideToTray`). A 1 s `executeJavaScript` poll samples `#video,#audio`.
   `before-quit` resumes normal teardown, or spawns the pending update installer
   with `/S` if one is registered (`update.pending`).
 
 ## Security model
 
-Anonymous visitors see only public YouTube data; playback URLs are signed media
-tickets (HMAC), never raw `googlevideo` URLs. Non-loopback requests require the
-invite cookie (`allowRequest`) except the whitelisted health/download manifest
-`/api/ping`, `/app-update.json`, `/download/DinosourWeb.apk`, favicon, manifest and
-icons. Nothing about YouTube is bypassed: no sign-in, no paid content restrictions,
-no DRM work, no age-gate dodging.
+Anonymous visitors see only public YouTube data; playback URLs are opaque random
+tickets (never raw `googlevideo` URLs) that the server resolves to signed media
+handles at request time. Non-loopback requests require the invite cookie
+(`allowRequest`) except the whitelisted health/download manifest `/api/ping`,
+`/app-update.json`, `/download/DinosourWeb.apk`, favicon, manifest and icon
+(`icons/favicon-32.png`). Nothing about YouTube is bypassed: no sign-in, no
+paid content restrictions, no DRM work, no age-gate dodging.
 
 ## Build, test & release
 
 - `npm run` lists every task. The default dev flow is `npm start`.
 - `npm run test:*` runs one suite. Browser suites (`test:browser`,
-  `test:watch-prefetch`, `test:features`) need system Chrome and FFmpeg; live tests
+  `test:watch-prefetch`, `test:features`, `test:playback-features`) need system Chrome
+  and either FFmpeg or no live network access for the local media path; live tests
   need network. `test:pwa` re-reads the shell cache name from `sw.js`.
+- CI: pushing to `main` runs `npm run check` + `npm test` on a throwaway server
+  at `:3210` (see `.github/workflows/ci.yml`). Browser suites are excluded
+  because Chrome and YouTube are not reliably available to the sandbox runner.
 - Android builds need the release keystore (`android/keystore.properties`,
   gitignored) and **fail hard** without it — never signs with debug keys for a
   release.
@@ -112,7 +116,7 @@ no DRM work, no age-gate dodging.
 
 - No new dependencies without arguing for them — the app ships dependency-free UI
   (only Playwright/build tooling in `devDependencies`).
-- Runtime JS stays ES modules. Shared JS lives in repo root as dual Node/import
-  modules (e.g. `audio-formats.js`).
+- Runtime JS is ES modules except the service worker (`public/sw.js`, classic
+  worker) and CommonJS (`desktop/main.cjs`).
 - `console.log` in `app.js` is for emergencies; tests assert on DOM and network
   behavior, not logs.

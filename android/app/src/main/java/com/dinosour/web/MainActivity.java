@@ -147,7 +147,7 @@ public class MainActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         webView.addJavascriptInterface(new AndroidBridge(), "DinosourAndroid");
 
         chromeClient = new DinosourChromeClient();
@@ -534,6 +534,10 @@ public class MainActivity extends Activity {
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
             if ("https".equals(uri.getScheme()) && "appassets.androidplatform.net".equals(uri.getHost())) return false;
+            // Only override well-known web/mailto/market URLs. Anything else stays inside
+            // the app and gets blocked, so no exotic intent handlers fire by accident.
+            String scheme = uri.getScheme();
+            if (!Arrays.asList("https", "http", "market", "mailto", "tel").contains(scheme)) return true;
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
             } catch (Exception ignored) {

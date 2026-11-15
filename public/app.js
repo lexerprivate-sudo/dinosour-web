@@ -16,9 +16,9 @@ let generation = 0, cleanup = () => {}, toastTimer, lastShortsQuery = '';
 let shortsFeed = [], shortsFeedCursor = '';
 let preferences = {};
 let playbackBusy = false, playbackBufferAhead = Infinity, miniSession = null;
+const isMetered = () => Boolean(navigator.connection?.saveData) || ['slow-2g', '2g'].includes(navigator.connection?.effectiveType || '');
 function allowPrefetch() {
-  return !playbackBusy && playbackBufferAhead >= 8 && !navigator.connection?.saveData &&
-    !/(^|-)2g$/.test(navigator.connection?.effectiveType || '');
+  return !playbackBusy && playbackBufferAhead >= 8 && !isMetered();
 }
 try { preferences = JSON.parse(localStorage.getItem('dinosour.ui.v1')); } catch { preferences = null; }
 if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) preferences = {};
@@ -1319,7 +1319,7 @@ async function reel(id, current, controller) {
     if (video.paused || !healthySince ||
         Math.min(bufferedAhead(video), separate ? bufferedAhead(audio) : Infinity) < Math.min(3, video.duration - video.currentTime)) return;
     if (id === entry().id) return;
-    if (navigator.connection?.saveData || ['slow-2g', '2g'].includes(navigator.connection?.effectiveType)) return;
+    if (isMetered()) return;
     const request = ++prefetchRequest;
     prefetching = id;
     try {
@@ -1784,14 +1784,14 @@ function getVideoId(text) {
   } catch { return null; }
 }
 const suggestionBox = $('#search-suggestions');
-let suggestTimer, suggestController, suggestionItems = [], suggestionIndex = -1;
+let suggestTimer, suggestController, suggestionIndex = -1;
 function closeSuggestions() {
   if (!suggestionBox) return;
-  suggestionBox.hidden = true; suggestionBox.innerHTML = ''; suggestionItems = []; suggestionIndex = -1;
+  suggestionBox.hidden = true; suggestionBox.innerHTML = ''; suggestionIndex = -1;
   $('#search').setAttribute('aria-expanded', 'false');
 }
 function renderSuggestions(items, recent = false) {
-  suggestionItems = items; suggestionIndex = -1;
+  suggestionIndex = -1;
   if (!items.length) return closeSuggestions();
   suggestionBox.innerHTML = items.map((value, index) => `<button type="button" class="search-suggestion" role="option" data-suggestion="${escape(value)}" data-index="${index}">${icon(recent ? 'history' : 'search')}<span class="suggest-label">${escape(value)}</span><span class="suggest-kind">${recent ? 'Recent' : ''}</span></button>`).join('') +
     (recent ? '<button type="button" class="suggest-clear" data-clear-recent>Clear recent searches</button>' : '');
