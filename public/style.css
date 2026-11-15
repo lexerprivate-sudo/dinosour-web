@@ -246,8 +246,28 @@ main:focus { outline: 0; }
 .player-shell video { width: 100%; height: 100%; display: block; }
 .player-shell audio { display: none; }
 .watch-loading { position: absolute; inset: 0; background: #161616; overflow: hidden; pointer-events: none; }
-.watch-loading > img { width: 100%; height: 100%; object-fit: contain; opacity: .65; }
-.watch-loading-caption { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: linear-gradient(transparent, #000b); text-shadow: 0 1px 4px #000; }
+.watch-loading > img { width: 100%; height: 100%; object-fit: contain; opacity: .7; animation: watch-kenburns 16s ease-in-out infinite alternate; }
+@keyframes watch-kenburns { from { transform: scale(1.02); } to { transform: scale(1.12) translate(1.5%, -1.5%); } }
+.watch-loading-caption { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; background: linear-gradient(transparent 55%, #000c), radial-gradient(ellipse at center, #0000002e 0%, transparent 70%); text-shadow: 0 1px 4px #000; }
+.watch-loading-caption .spinner { width: 56px; height: 56px; border-width: 4px; }
+.watch-loading-caption .spinner::after { inset: -4px; border-width: 4px; filter: drop-shadow(0 0 10px #ffffff40); }
+.watch-loading-caption > strong, .watch-loading-caption > span:last-child { animation: caption-rise .7s cubic-bezier(.2,.7,.3,1) both; }
+.watch-loading-caption > span:last-child { animation-delay: .12s; }
+@keyframes caption-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.watch-loading-caption::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, transparent 0%, #fff 12%, #fff 26%, transparent 38%, transparent 48%, #ffffff99 56%, #fff 66%, transparent 78%, transparent 100%);
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  animation: loading-sweep 1.8s cubic-bezier(.4,.1,.4,.9) infinite;
+  opacity: .85;
+}
+@keyframes loading-sweep { from { background-position: 130% 0; } to { background-position: -40% 0; } }
 .watch-loading-caption > span:last-child { max-width: 90%; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-buffer-hint { position: absolute; top: 16px; left: 16px; padding: 8px 14px; border-radius: 20px; background: #000b; font-size: 13px; pointer-events: none; }
 .watch-loading[hidden], .watch-buffer-hint[hidden] { display: none; }
@@ -297,8 +317,37 @@ body:has(#mini-player:not([hidden])) main { padding-bottom: 330px; }
 .player-status button { background: #f1f1f1; color: #0f0f0f; }
 .unmute { position: absolute; left: 16px; bottom: 72px; z-index: 5; background: #f1f1f1; color: #0f0f0f; border-radius: 18px; padding: 9px 16px; font-weight: 600; box-shadow: 0 2px 10px #0006; }
 .unmute:hover { background: #fff; }
-.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid #ffffff30; border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border: 3px solid #ffffff2e;
+  border-radius: 50%;
+  animation: spinner-breathe 2.6s ease-in-out infinite;
+}
+.spinner::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: #fff;
+  border-right-color: #ffffff73;
+  animation: spinner-arc 1.5s cubic-bezier(.45,.1,.35,.9) infinite;
+  will-change: transform;
+}
+/* Purposeful cadence: the arc sweeps faster mid-turn and eases at the edges,
+   so it reads as "making progress" instead of a uniform spin. */
+@keyframes spinner-arc {
+  from { transform: rotate(-90deg); }
+  60% { transform: rotate(210deg); }
+  to { transform: rotate(270deg); }
+}
+@keyframes spinner-breathe {
+  0%, 100% { transform: scale(1); opacity: .88; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
 .watch-title { font-size: 20px; line-height: 28px; font-weight: 700; letter-spacing: -.2px; margin: 14px 0 14px; }
 .watch-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .channel { display: flex; align-items: center; gap: 12px; margin-right: auto; }
