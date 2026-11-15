@@ -126,11 +126,6 @@ function card(v) {
   const percent = watchProgress(v);
   return `<article class="card"><div class="thumb"><a href="${href}" aria-label="Watch ${escape(v.title)}"><img src="${escape(v.thumb)}" alt="" loading="lazy" decoding="async"></a>${v.duration ? `<span class="duration">${duration(v.duration)}</span>` : ''}${percent ? `<span class="watched-bar" style="width:${percent.toFixed(1)}%" aria-hidden="true"></span>` : ''}<button class="save-card ${saved ? 'selected' : ''}" data-save="${v.id}" aria-label="${saved ? 'Remove' : 'Save'} ${escape(v.title)} ${saved ? 'from' : 'to'} Watch later" aria-pressed="${saved}" title="${saved ? 'Saved to Watch later' : 'Watch later'}">${icon(saved ? 'check' : 'clock')}</button></div><div class="card-body"><span class="avatar" style="--avatar-hue:${hue}" aria-hidden="true">${escape(v.channel?.[0]?.toUpperCase() || 'Y')}</span><div class="card-copy"><h3><a href="${href}">${escape(v.title)}</a></h3><p>${escape(v.channel)}</p><p>${escape(v.viewsText || views(v.views))}</p><div class="queue-card-tools"><button data-queue-next="${v.id}" aria-label="Play next: ${escape(v.title)}">Play next</button><button data-queue-add="${v.id}" aria-label="Queue: ${escape(v.title)}">Queue</button></div></div></div></article>`;
 }
-function welcome() {
-  // Onboard only genuinely new users: no history, no topics, no saved items.
-  if (library.history.length || library.saved.length || library.liked.length || preferences.topics.length) return '';
-  return `<section class="welcome-card" aria-labelledby="welcome-title"><div class="welcome-copy"><h2 id="welcome-title">Welcome to Dinosour</h2><p>Public YouTube videos with no account, no subscription, and nothing to sign into.</p><div class="welcome-actions"><a class="primary" href="#shorts">Browse Shorts</a><button class="primary ghost" data-add-topic>Add a topic</button></div></div><div class="welcome-hint"><strong>Tip:</strong> paste any YouTube video link or ID into the search bar to start watching instantly.</div></section>`;
-}
 function continueWatching() {
   // Older history entries may not have a stored duration yet. Keep them
   // resumable anyway; the progress bar appears once duration is known.
@@ -213,7 +208,7 @@ async function feed(query, current, controller, mode = 'video') {
   const heading = shorts
     ? `<div class="search-heading shorts-heading"><h1>${query ? `Shorts for ${escape(query)}` : 'Shorts'}</h1></div>`
     : home ? '<h1 class="sr-only">Home</h1>' : `<div class="search-heading"><h1>Results for ${escape(query)}</h1><span>Videos</span></div>`;
-  main.innerHTML = `${welcome()}${chips(query || '', shorts ? 'shorts' : 'search')}${home ? continueWatching() : ''}${heading}${filterBar}<h2 class="sr-only">${shorts ? 'Shorts feed' : 'Videos'}</h2><div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
+  main.innerHTML = `${chips(query || '', shorts ? 'shorts' : 'search')}${home ? continueWatching() : ''}${heading}${filterBar}<h2 class="sr-only">${shorts ? 'Shorts feed' : 'Videos'}</h2><div id="feed" aria-busy="true">${shorts ? shortsSkeleton() : skeleton()}</div>`;
   let continuation = '', loading = false, ended = false, failed = false, initialized = false, frame;
   const seen = new Set(), usedCursors = new Set(), allResults = [];
   const durationMatches = v => filters.duration === 'any' || !v.duration ||
