@@ -647,14 +647,28 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Only the bundled app origin may use the bridge. If a user ever navigates to a
+    // foreign page (an ad link, a shared URL), no native power is reachable from it.
+    private boolean isAppOrigin() {
+        if (webView == null) return false;
+        try {
+            String host = new java.net.URI(webView.getUrl()).getHost();
+            return Config.APP_ORIGIN.equals("https://" + host);
+        } catch (java.net.URISyntaxException error) {
+            return false;
+        }
+    }
+
     private class AndroidBridge {
         @JavascriptInterface
         public void appReady() {
+            if (!isAppOrigin()) return;
             runOnUiThread(() -> interfaceReady());
         }
 
         @JavascriptInterface
         public void startupFailed(String message) {
+            if (!isAppOrigin()) return;
             final String detail = message == null ? "The interface could not start." : message.substring(0, Math.min(message.length(), 400));
             runOnUiThread(() -> {
                 if (!startupReady && !isFinishing() && !isDestroyed())
@@ -664,6 +678,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void exportBackup(String data) {
+            if (!isAppOrigin()) return;
             if (data.length() > 2 * 1024 * 1024) return;
             runOnUiThread(() -> {
                 pendingBackup = data;
@@ -677,16 +692,19 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface
         public void nativeRequest(String id, String kind, String payload) {
+            if (!isAppOrigin()) return;
             if (engine != null) engine.request(id, kind, payload);
         }
 
         @JavascriptInterface
         public void cancelRequest(String id) {
+            if (!isAppOrigin()) return;
             if (engine != null) engine.cancel(id);
         }
 
         @JavascriptInterface
         public String readStorage() {
+            if (!isAppOrigin()) return "{}";
             JSONObject result = new JSONObject();
             try {
                 for (String key : STORAGE_KEYS) if (prefs.contains("web." + key)) result.put(key, prefs.getString("web." + key, ""));
@@ -696,6 +714,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void saveStorage(String key, String value) {
+            if (!isAppOrigin()) return;
             if (!java.util.Arrays.asList(STORAGE_KEYS).contains(key) || value.length() > 2 * 1024 * 1024) return;
             if (value.isEmpty()) prefs.edit().remove("web." + key).apply();
             else prefs.edit().putString("web." + key, value).apply();
@@ -703,21 +722,25 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openSettings() {
+            if (!isAppOrigin()) return;
             runOnUiThread(() -> showSettings(false));
         }
 
         @JavascriptInterface
         public void backgroundAudio(boolean playing, String title) {
+            if (!isAppOrigin()) return;
             runOnUiThread(() -> updateBackgroundAudio(playing, title));
         }
 
         @JavascriptInterface
         public void checkForUpdates() {
+            if (!isAppOrigin()) return;
             runOnUiThread(() -> MainActivity.this.checkForUpdates(Config.UPDATE_ORIGIN));
         }
 
         @JavascriptInterface
         public String versionName() {
+            if (!isAppOrigin()) return "unknown";
             return BuildConfig.VERSION_NAME;
         }
     }
