@@ -743,6 +743,7 @@ async function watch(id, current, controller, refresh) {
   // replaces this panel when it arrives.
   api(`/api/video-lite?id=${encodeURIComponent(id)}`, controller.signal).then(lite => {
     if (disposed || !lite) return;
+    setMediaMetadata(lite.title, lite.channel);
     const info = $('#watch-info');
     if (info && !info.innerHTML.trim()) {
       info.innerHTML = `<h1 class="watch-title">${escape(lite.title)}</h1><p class="description-preview"><strong>${escape(lite.channel)}</strong>${lite.views ? ` · ${escape(views(lite.views))}` : ''}</p>`;
@@ -786,6 +787,52 @@ async function watch(id, current, controller, refresh) {
   const clearStatus = () => { status.innerHTML = ''; status.hidden = true; };
   const showStatus = html => { status.innerHTML = html; status.hidden = false; };
   let disposed = false, syncTimer, lastSave = 0, separate = false, info, audioFallbacks = [], audioIndex = 0, healthySince = 0, retrying = false;
+  // Background listening: when the app goes away, hold only the audio track.
+  // The video decoder would idle-burn battery and risk background killers,
+  // while audio alone is exactly what a "music" session needs.
+  let backgroundAudioHold = false;
+  // Media Session: the same API the real YouTube/Spotify clients use. Android
+  // maps it to a native MediaSession for WebView pages, which is what makes
+  // the notification and lockscreen show track info and working controls.
+  const advanceToNext = () => {
+    const next = library.queue.shift() || videos.get($('#related a[href^="#watch="]')?.getAttribute('href')?.slice(7));
+    persist(); renderQueue();
+    if (next && next.id !== id) location.hash = `#watch=${next.id}`;
+  };
+  const setMediaMetadata = (title, channel) => {
+    if (!('mediaSession' in navigator) || !title) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist: channel || 'Dinosour',
+        album: 'Dinosour',
+        artwork: [{ src: `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' }],
+      });
+      navigator.mediaSession.playbackState = video.paused ? 'paused' : 'playing';
+    } catch { /* media session unavailable */ }
+  };
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('play', () => video.play());
+      navigator.mediaSession.setActionHandler('pause', () => video.pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => history.back());
+      navigator.mediaSession.setActionHandler('nexttrack', advanceToNext);
+    } catch { /* media session unavailable */ }
+  }
+  const onVisibility = () => {
+    if (document.hidden) {
+      if (!disposed && !audio.paused && !video.paused) {
+        ignorePause = true;
+        video.pause();
+        backgroundAudioHold = true;
+      }
+    } else if (backgroundAudioHold && !disposed) {
+      backgroundAudioHold = false;
+      video.currentTime = audio.currentTime;
+      if (playingIntent) video.play().catch(() => {});
+    }
+  };
+  document.addEventListener('visibilitychange', onVisibility);
   const saveProgress = () => {
     if (!info || video.currentTime < 1) return;
     library.history = [{ ...compact(info), position: video.ended ? 0 : video.currentTime, duration: video.duration || info.duration || 0, watchedAt: Date.now() }, ...library.history.filter(v => v.id !== id)].slice(0, 200);
@@ -793,6 +840,7 @@ async function watch(id, current, controller, refresh) {
   };
   cleanup = () => {
     saveProgress(); disposed = true; clearInterval(syncTimer); clearTimeout(waitingTimer); clearTimeout(stallTimer);
+    document.removeEventListener('visibilitychange', onVisibility);
     clearInterval(statsTimer); $('#stats-dialog')?.remove();
     playbackBusy = false; playbackBufferAhead = Infinity;
     captionRequest++; if (captionBlob) URL.revokeObjectURL(captionBlob);
@@ -844,6 +892,7 @@ async function watch(id, current, controller, refresh) {
     const restartKey = `dinosour.restart.${id}`;
     const savedPosition = sessionStorage.getItem(restartKey) ? 0 : (library.history.find(v => v.id === id)?.position || 0);
     sessionStorage.removeItem(restartKey);
+    setMediaMetadata(info.title, info.channel);
     $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
     bindInfoActions(id);
     library.queue = library.queue.filter(v => v.id !== id); persist();
@@ -1890,16 +1939,16 @@ if (window.DinosourAndroid?.openSettings) {
 // Signal readiness after initialization, without waiting for live feed requests.
 window.__dinosourReady = true;
 window.DinosourAndroid?.appReady?.();
-// Keep the Android background-audio service in sync with the main player.
-// Only the active player element carries the #video id, so preloaded buffers
-// never trigger it.
-if (window.DinosourAndroid?.backgroundAudio) {
-  const sendAudioState = playing => window.DinosourAndroid.backgroundAudio(
-    playing, playing ? document.title.replace(/ — Dinosour$/, '') : '');
-  document.addEventListener('playing', event => {
-    if (event.target.id === 'video') sendAudioState(true);
-  }, true);
-  document.addEventListener('pause', event => {
-    if (event.target.id === 'video') sendAudioState(false);
-  }, true);
-}
+// Track media playback state for the OS media notification and keep the
+// Android background-audio service in sync. Only the active player element
+// carries the #video id, so preloaded buffers never trigger either.
+document.addEventListener('playing', event => {
+  if (event.target.id !== 'video') return;
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  window.DinosourAndroid?.backgroundAudio?.(true, document.title.replace(/ — Dinosour$/, ''));
+}, true);
+document.addEventListener('pause', event => {
+  if (event.target.id !== 'video') return;
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  window.DinosourAndroid?.backgroundAudio?.(false, '');
+}, true);
