@@ -463,13 +463,12 @@ The Android build uses youtubedl-android 0.18.1 (GPL-3.0). See
 Gradle downloads and verifies the pinned yt-dlp 2026.10.26 executable at build
 time; the installed APK includes it, Python, and QuickJS.
 
-## Studying YouTube
+## How it works
 
-Earlier investigations (REA capture files, Ghidra installation, reference frames)
-are kept as local machine-research artifacts, not part of the app. The shipped
-code reflects: anonymous `youtubei/v1/search` and Shorts sequence APIs, separate
-H.264/AAC tracks, and stacked player pairs for instant Shorts promotion. See
-`docs/ARCHITECTURE.md` and `docs/RELEASE.md` for how the app is built.
+The shipped code reflects: anonymous YouTube InnerTube calls (`youtubei/v1/search`,
+the Shorts sequence endpoint), separate H.264/AAC tracks, bounded 1 MB media chunks
+through a local byte-range proxy with one chunk read-ahead, and stacked player pairs
+for instant Shorts promotion. `docs/ARCHITECTURE.md` maps every flow.
 
 ## Verification
 

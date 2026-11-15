@@ -16,8 +16,11 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run check
-      - name: Unit/API tests (hermetic; starts its own server)
-        run: npm test
-      - name: Android APK builds with signing
-        if: ${{ always() }}
-        run: echo 'Android assembleRelease runs on a self-hosted runner with signing secrets; skipped on ephemeral runners.'
+      - name: Unit/API tests
+        run: |
+          node server.js > ci-server.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:3210/api/ping > /dev/null && break
+            sleep 1
+          done
+          npm test

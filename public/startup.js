@@ -1,6 +1,15 @@
 // Keep this bootstrap compatible with older WebViews so a syntax/module failure
 // in the main application produces recovery controls instead of a blank screen.
+// Also paint the saved theme before CSS to avoid a dark/light flash on load.
 (function () {
+  try {
+    var p = window.localStorage.getItem('dinosour.ui.v1');
+    var t = p ? JSON.parse(p).theme : null;
+    if (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+    document.documentElement.dataset.theme = t || 'dark';
+    var m = document.querySelector('meta[name=theme-color]');
+    if (m) m.content = t === 'light' ? '#ffffff' : '#0f0f0f';
+  } catch (e) {}
   var bridge = window.DinosourAndroid;
   if (!bridge || !bridge.startupFailed) return;
   function fail(message) {

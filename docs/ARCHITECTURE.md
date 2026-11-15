@@ -16,8 +16,10 @@ This document is the map a new contributor needs before touching any of it.
 - `media-chunks.js` — bounded 1 MB chunked reads through the byte-range proxy with
   one chunk read-ahead and a 64 MB LRU. Suffix/signed range quirks live here; do not
   open-code ranges elsewhere.
-- `audio-formats.js` — `DEFAULT_LANGUAGES` + `pickAudioFormat`, shared by Node and
-  the Android WebView (assets include it as `native/audio-formats.js`).
+- `audio-formats.js` — `selectAudioFormats`, `audioTrackGroups`, `preferredAudio`
+  — shared by Node and the Android WebView (assets include it as
+  `native/audio-formats.js`). Signed media URLs carry an opaque 24-byte ticket
+  issued by `server.js` (see "Request lifecycle").
 - `public/app.js` — the single-page client. No build step; plain ES modules inline.
 - `desktop/main.cjs` — Electron main. Forks `server.js` as a child (`ELECTRON_RUN_AS_NODE=1`)
   on fixed ports 43219/43220, starts the tray updater and (optionally) the background
@@ -35,9 +37,11 @@ This document is the map a new contributor needs before touching any of it.
    ~150–500 ms) returns title/channel/views; the full yt-dlp path
    (`/api/video` → `getVideo`) resolves formats/captions afterwards and rewrites
    `#watch-info`.
-4. Each media URL is an opaque ticket (HMAC of the signed URL, `tickets` map).
-   `/api/stream/<ticket>` proxies bytes; `media-chunks.js` decides between the chunk
-   proxy and open-range upstream.
+4. Each media URL is an opaque ticket (`tickets`, a 24-byte random key stored
+   server-side, 6 h TTL, FIFO at 600 entries). `/api/stream/<ticket>` proxies
+   bytes; `media-chunks.js` decides between the chunk proxy and open-range
+   upstream. The ticket proves no request shape; it's a random index-and-check,
+   so it carries no information about the upstream URL.
 5. Playback uses one `<video>` + one `<audio>`. The audio element is the loud one on
    watch pages (H.264 video + AAC audio tracks). The Shorts reel keeps two player
    pairs; the idle pair pre-buffers the next Short.

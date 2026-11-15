@@ -569,12 +569,6 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, withStreamUrls(await getVideo(id), mediaBaseFor(req)));
     }
     if (url.pathname.startsWith('/api/stream/')) return serveStream(req, res, url);
-    if (url.pathname === '/.well-known/assetlinks.json') {
-      const body = await readFile(root + '.well-known/assetlinks.json').catch(() => null);
-      if (!body) return json(res, 404, { error: 'Not found.' });
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': body.length, 'cache-control': 'public, max-age=3600' });
-      return res.end(req.method === 'HEAD' ? undefined : body);
-    }
     if (url.pathname === '/app-update.json') {
       const body = await readFile(root + 'app-update.json').catch(() => null);
       if (!body) return json(res, 404, { error: 'Not found.' });
@@ -626,7 +620,7 @@ const server = http.createServer(async (req, res) => {
       'cache-control': file[2],
       // A conservative CSP: the app uses no remote code; images come from us or
       // i.ytimg.com; media flows same-origin or via the localhost loopback media port.
-      ...(isHtml ? { 'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ytimg.com data:; media-src 'self' https://*.googlevideo.com http://127.0.0.1:* http://localhost:* blob:; connect-src 'self' blob:; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" } : {}),
+      ...(isHtml ? { 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://i.ytimg.com data:; media-src 'self' https://*.googlevideo.com http://127.0.0.1:* http://localhost:* blob:; connect-src 'self' blob:; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" } : {}),
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch (error) {
