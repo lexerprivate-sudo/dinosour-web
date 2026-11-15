@@ -129,10 +129,33 @@ try {
   // the layout checks above use it, then playback switches to a known-good
   // public Short inside the same session (the Shorts feed and cursor stay loaded).
   await live.evaluate(() => { location.hash = '#short=H8hVCPzVCIM'; });
-  await live.waitForFunction(() => {
-    const video = document.querySelector('#video'), audio = document.querySelector('#audio');
-    return location.hash === '#short=H8hVCPzVCIM' && video && audio && video.currentTime > 2 && !video.paused && audio.currentTime > 1 && !audio.paused;
-  }, null, { timeout: 120000 });
+  try {
+    await live.waitForFunction(() => {
+      const video = document.querySelector('#video'), audio = document.querySelector('#audio');
+      return location.hash === '#short=H8hVCPzVCIM' && video && audio && video.currentTime > 2 && !video.paused && audio.currentTime > 1 && !audio.paused;
+    }, null, { timeout: 150000 });
+  } catch (error) {
+    const lifecycle = await live.evaluate(() => {
+      const video = document.querySelector('#video'), audio = document.querySelector('#audio');
+      const quality = video?.getVideoPlaybackQuality?.();
+      return {
+        hash: location.hash,
+        video: video ? {
+          currentTime: video.currentTime, paused: video.paused, ended: video.ended,
+          readyState: video.readyState, networkState: video.networkState,
+          error: video.error ? { code: video.error.code, message: video.error.message } : null,
+          totalFrames: quality?.totalVideoFrames ?? null, droppedFrames: quality?.droppedVideoFrames ?? null,
+        } : null,
+        audio: audio ? {
+          currentTime: audio.currentTime, paused: audio.paused, ended: audio.ended,
+          readyState: audio.readyState, networkState: audio.networkState,
+          error: audio.error ? { code: audio.error.code, message: audio.error.message } : null,
+        } : null,
+      };
+    }).catch(evalError => ({ evaluateFailed: evalError.message }));
+    console.error('PLAYBACK LIFECYCLE ON FAILURE:', JSON.stringify(lifecycle));
+    throw error;
+  }
   assert.equal(await live.locator('#reel-loading').isHidden(), true, 'reel loading spinner is still visible after playback starts');
   assert.ok((await live.locator('.watch-title').textContent()).trim().length > 0);
   assert.equal(await live.locator('.reel-channel').innerText().then(text => /shorts/i.test(text)), false, 'channel row still says Shorts');

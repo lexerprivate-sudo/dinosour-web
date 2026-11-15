@@ -420,13 +420,30 @@ function discardWarmWatch() {
 function maybeKeepWarmWatch(nextId) {
   if (warmWatch && warmWatch.id !== nextId) discardWarmWatch();
 }
-function prepareWatch(id) {
-  if (!allowPrefetch()) return;
+// Warm the upcoming queue/related video into a detached, real media pair.
+// With `force` (Play pressed), warm before any buffer exists; without it,
+// wait until this video reaches a healthy buffer. The queue head is an
+// explicit watch choice, so it warms even with autoplay off; related
+// entries only warm when autoplay will actually advance to them. A warm
+// entry for a stale target is displaced by the current queue head.
+function warmNextWatch(currentId, force = false) {
+  if (isMetered()) return;
+  const queued = library.queue[0]?.id;
+  if (!queued && !preferences.autoplay) return;
+  if (!force && !allowPrefetch()) return;
+  const nextId = queued || $('#related a[href^="#watch="]')?.getAttribute('href')?.slice(7);
+  if (nextId && nextId !== currentId) prepareWatch(nextId, force);
+}
+function prepareWatch(id, force = false) {
+  // `force` warms on an explicit Play press, before any buffer exists.
+  // Metered connections are never prefetched, even then.
+  if (force ? isMetered() : !allowPrefetch()) return;
   if (warmWatch?.id === id || location.hash === `#watch=${id}`) return;
   maybeKeepWarmWatch(id);
-  const entry = { id, controller: new AbortController(), video: document.createElement('video'), audio: document.createElement('audio') };
+  const entry = { id, controller: new AbortController(), video: document.createElement('video'), audio: document.createElement('audio'), ready: false };
   warmWatch = entry;
   entry.video.preload = entry.audio.preload = 'auto';
+  entry.video.addEventListener('canplaythrough', () => { entry.ready = true; }, { once: true });
   entry.video.playsInline = true;
   entry.promise = shortInfo(id).then(info => {
     if (entry.controller.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
@@ -1050,7 +1067,7 @@ async function watch(id, current, controller, refresh) {
         `Player      ${document.pictureInPictureElement ? 'picture-in-picture' : 'in page'}`,
       ];
       $('#stats-body').textContent = lines.join('\n');
-      window.__dinosourStats = { metadataMs, firstFrameMs, rebuffers, recoveries, qualityLoads, buffer: playbackBufferAhead };
+      window.__dinosourStats = { metadataMs, firstFrameMs, rebuffers, recoveries, qualityLoads, buffer: playbackBufferAhead, warmReady: Boolean(warmed?.ready) };
     };
     $('#stats-toggle').onclick = () => {
       statsDialog.showModal(); updateStats();
@@ -1179,7 +1196,12 @@ async function watch(id, current, controller, refresh) {
       audioTrack = preferredAudio(info); updateTracks();
       loadQuality(selectedQuality, video.currentTime, !video.paused);
     };
-    video.onplay = () => { playingIntent = true; if (video.readyState >= 3) playAudio(); };
+    video.onplay = () => {
+      playingIntent = true; if (video.readyState >= 3) playAudio();
+      // Any play intent (autoplay, #start-play button, Space/k): warm the queued
+      // next video now, before any buffering exists. No-ops once one is warm.
+      warmNextWatch(id, true);
+    };
     video.onplaying = () => {
       switching = false; playbackBusy = false; clearTimeout(stallTimer); clearTimeout(watchdog);
       if (!firstFrameMs) firstFrameMs = performance.now() - watchStarted;
@@ -1226,10 +1248,18 @@ async function watch(id, current, controller, refresh) {
     video.onratechange = syncAudio;
     video.onended = () => {
       audio.pause(); saveProgress(); playingIntent = false; clearTimeout(stallTimer);
-      if (!preferences.autoplay) return;
-      const next = library.queue.shift() || videos.get($('#related a[href^="#watch="]')?.getAttribute('href').slice(7));
+      clearTimeout(waitingTimer);
+      loading.hidden = true; bufferHint.hidden = true; frozenFrame.hidden = true;
+      // When no navigation happens, release the busy/buffer state so the next
+      // manual interaction starts fresh (the navigate path is reset by cleanup()).
+      const resetPlaybackState = () => { playbackBusy = false; playbackBufferAhead = Infinity; };
+      if (!preferences.autoplay) { resetPlaybackState(); return; }
+      const href = $('#related a[href^="#watch="]')?.getAttribute('href') || '';
+      const relatedId = href.match(/^#watch=([\w-]{11})$/)?.[1];
+      const next = library.queue.shift() || (relatedId ? videos.get(relatedId) : undefined);
       persist(); renderQueue();
       if (next && next.id !== id) location.hash = `#watch=${next.id}`;
+      else resetPlaybackState();
     };
     video.ontimeupdate = () => {
       if (healthySince && Date.now() - healthySince > 10000) autoRetryCount.delete(id);
@@ -1245,10 +1275,9 @@ async function watch(id, current, controller, refresh) {
       syncAudio();
       playbackBufferAhead = Math.min(ahead(video), separate ? ahead(audio) : Infinity);
       if (playbackBufferAhead < 3) { /* hold warm buffer; it recovers */ }
-      if (preferences.autoplay && !warmWatch && allowPrefetch()) {
-        const nextId = library.queue[0]?.id || $('#related a[href^="#watch="]')?.getAttribute('href').slice(7);
-        if (nextId && nextId !== id) prepareWatch(nextId);
-      }
+      // Once this video reaches a healthy buffer, hold a warm pair ready for
+      // the next queue/related video. prepareWatch dedupes, so a shifted queue re-warms.
+      warmNextWatch(id);
       // Progressive MP4 sources cannot switch quality seamlessly. Raising the
       // quality here discarded a healthy buffer every 25 seconds. Keep Auto
       // stable; its stall handler can still lower quality when necessary.
@@ -1319,6 +1348,10 @@ async function reel(id, current, controller) {
   const showStatus = html => { clearLoadHint(); status.innerHTML = html; status.hidden = false; };
 
   const known = shortsFeed.some(v => v.id === id);
+  // Deep-link into #short= without a feed-context: drop any stale topic list
+  // and do a one-shot All-feed fetch so the reel shows the same feed the
+  // Shorts button would have.
+  if (!known) { shortsFeed = []; shortsFeedCursor = ''; }
   let list = shortsFeed.slice();
   if (!known) list.unshift({ id, title: 'YouTube Short', channel: 'YouTube Short', viewsText: '', thumb: `/api/thumb/${id}?t=short`, type: 'short' });
   let index = list.findIndex(v => v.id === id);

@@ -12,10 +12,11 @@ local origin preserves saved videos, topics, settings and history across app
 upgrades. Browser/Android libraries can be transferred using Settings backup
 export/import. Desktop updates are separate from Android releases.
 
-Desktop 1.1.6 keeps sound playing in the background: while media plays,
-closing the window only hides it to the system tray (with a hint balloon the
-first time) and the tray icon offers Open/Quit; the Dinosour menu Quit always
-exits fully. The app also updates itself: it checks GitHub for a newer
+Desktop 1.1.6 keeps sound playing in the background (music mode: the video track
+pauses and the audio keeps playing): while media plays, closing the window only
+hides it to the system tray (with a hint balloon the first time) and the tray
+icon offers Open/Quit; the Dinosour menu Quit always exits fully. The app also
+updates itself: it checks GitHub for a newer
 `desktop-v` release shortly after startup, downloads the installer to the
 profile's `updates` folder, verifies its SHA-256 against the release notes,
 and runs the silent installer when the app next quits. Nothing is placed on
@@ -43,10 +44,14 @@ The **1.2.7 Android app is standalone**: install `DinosourWeb.apk`, open it,
 and watch using Wi-Fi or mobile data. No PC, server address, tunnel, invite code,
 hosting account, or YouTube account is required. The interface and playback
 engine are bundled in the APK. Only public, unrestricted recorded videos are
-supported. 1.2.0+ adds background playback: sound continues when you switch
-apps or turn the screen off, backed by a foreground media service with a
-notification play/pause control; the app requests notification and wake-lock
-permissions for this.
+supported. 1.2.0+ added background playback and current releases run it as a
+music session: when you switch apps or turn the screen off, the video track
+pauses and the audio keeps playing. Sound is backed by a foreground media
+service (notification with a title and a play/pause button, plus a partial
+wake lock); the in-page MediaSession is mapped to Android's MediaSession,
+which surfaces the track title, channel and artwork with play/pause and
+next/previous controls on the lock screen. The app requests notification and
+wake-lock permissions for this.
 
 The Windows app manages its bundled local service automatically. The browser
 development version below uses a manually started Node server. Android does not
@@ -316,7 +321,7 @@ implementation of its native transport.
   sequentially before a click. Shared requests avoid repeating extraction.
   Client metadata expires after two minutes and is limited to 20 entries.
 - Speculative loading is skipped on Data Saver/2G connections, cancelled when
-  leaving the page, and expires after 45 seconds.
+  leaving the page, and the warmed player expires after three minutes.
 - While playback starts, the thumbnail and a loading message replace the blank
   player. Later buffering uses a small indicator over the last video frame.
 - Saved-position playback works with warmed players; playback controls wrap on
@@ -341,9 +346,13 @@ A signed standalone Android build is included:
 - Shows a native opening screen until the interface is ready, independently of
   network loading. Startup failures show retry and WebView update controls;
   a 15-second watchdog catches missing readiness signals.
-- Background playback: a foreground media service (notification + wake lock)
-  keeps sound running when the app is backgrounded or the screen is off; the
-  notification's play/pause button toggles the video element.
+- Background playback (music mode): when the app is backgrounded or the screen
+  is off, the video track pauses and the audio keeps playing. A foreground
+  media service with a partial wake lock keeps audio alive; the notification
+  shows the track title with a play/pause button that toggles the video
+  element, and the in-page MediaSession is mapped to Android's MediaSession,
+  exposing title, channel and artwork with play/pause and next/previous
+  controls on the lock screen.
 
 This application is a separate fork of an earlier project. It has its own
 Android package and GitHub repository.
@@ -471,13 +480,20 @@ releases are cut.
 What you need:
 
 - Node.js 22+ and `npm ci` once.
-- A server on port 3210 for networked suites: `node server.js` in another terminal
-  (tests also honor `TEST_URL`). Unit suites spawn their own server.
+- A server on port 3210 for `npm test` and the browser suites: `node server.js`
+  in another terminal. `api.test.js` and `pwa.test.js` expect it there (they
+  honor `TEST_URL`); `access.test.js` spawns its own isolated server on a
+  random port. The browser suites mostly hardcode 127.0.0.1:3210; prefetch,
+  watch-prefetch, pwa-browser and features honor `TEST_URL` instead.
 - **System Chrome** (not bundled) for browser suites,
-- **FFmpeg** on PATH for media-related browser suites (watch-prefetch, features).
+- **FFmpeg** on PATH for media-related browser suites (watch-prefetch,
+  playback-features, features).
+- **yt-dlp** on PATH for the suites whose playback reaches YouTube (browser,
+  recovery, shorts) — the development server needs it too.
 - Internet access for anything that touches YouTube.
-- Internet and `npm ci` dependencies for build/release suites; a built APK for
-  `test:native` and a desktop install for `test:desktop`.
+- Internet and `npm ci` dependencies for build/release suites; the Android
+  build output for `test:native` (`android/app/build/playbackEngine/yt-dlp`,
+  run via Python 3.11+) and a built desktop install for `test:desktop`.
 
 Run, from the repository root:
 
@@ -496,13 +512,15 @@ npm run test:pwa
 ```
 
 For the standalone adapter, build the APK first, then run `npm run test:native`.
+It loads the bundled UI at its virtual Android origin, uses the exact packaged
+yt-dlp (`android/app/build/playbackEngine/yt-dlp`) through a desktop
+implementation of the native boundary, and checks live search, direct media
+playback, storage backup, and absence of PC/tunnel requests. It needs Python
+3.11+, Node, Chrome, and internet access, and it does not replace testing the
+Android native executables on a physical device.
 Run `npm run test:startup` for stalled-network readiness and script-failure recovery
-notifications using the Android bridge simulation.
-This test needs Python 3.11+, Node, Chrome, and internet access. It loads the
-bundled UI at its virtual Android origin, uses the exact packaged yt-dlp through
-a desktop implementation of the native boundary, and checks live search, direct
-media playback, storage backup, and absence of PC/tunnel requests. It does not
-replace testing the Android native executables on a physical device.
+notifications using the Android bridge simulation; it stubs the Android origin
+and needs only Node and Chrome, with no network access.
 
 `npm test` also checks the PWA manifest, icon dimensions and MIME types, the
 uncached service worker, `viewport-fit=cover`, and the safe-area CSS.
