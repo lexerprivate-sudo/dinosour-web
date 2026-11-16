@@ -1120,11 +1120,17 @@ async function watch(id, current, controller, refresh) {
     if (!fill) return;
     let buffered = 0;
     try { if (video.buffered && video.buffered.length) buffered = video.buffered.end(video.buffered.length - 1) - video.currentTime; } catch {}
-    const fraction = Math.max(0, Math.min(1, buffered / 45)); // 45 s ahead is plenty
+    const target = Math.min(8, video.duration || 8);
+    const fraction = Math.max(0, Math.min(1, buffered / target)); // ready against ~first 8 s of playback
+    const indeterminate = fraction === 0; // no meaningful buffered data yet (metadata / first-byte phase)
     const circumference = 2 * Math.PI * 34;
-    fill.style.strokeDashoffset = String(circumference * (1 - fraction));
+    // In indeterminate mode draw a partial arc so the rotating sweep is visible.
+    fill.style.strokeDashoffset = String(circumference * (indeterminate ? 0.75 : 1 - fraction));
     if (pct) pct.textContent = String(Math.round(fraction * 100) + '%');
-    if (ring) ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+    if (ring) {
+      ring.classList.toggle('indeterminate', indeterminate);
+      ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+    }
   };
   const bufferTimer = setInterval(bufferFill, 200);
   // Watchdog: if within 25s of opening the page the video has not advanced to
