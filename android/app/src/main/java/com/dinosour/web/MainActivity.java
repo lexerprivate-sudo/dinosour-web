@@ -529,6 +529,19 @@ public class MainActivity extends Activity {
             if (!"https".equals(uri.getScheme()) || !"appassets.androidplatform.net".equals(uri.getHost())) return null;
             String path = uri.getPath();
             if (path == null || path.contains("..") || path.contains("\\")) return NativeEngine.empty(404);
+            // Offline downloads are served from no-backup files; GET/HEAD only.
+            if (path.startsWith("/dl/")) {
+                String[] parts = path.split("/");
+                String method = request.getMethod();
+                if (parts.length == 4 && ("GET".equals(method) || "HEAD".equals(method))) {
+                    String dlId = parts[2], kind = parts[3];
+                    if (dlId.matches("[A-Za-z0-9_-]{11}") && ("video".equals(kind) || "audio".equals(kind)) && engine != null) {
+                        try { return engine.fileRange(dlId, kind, request.getRequestHeaders().get("Range")); }
+                        catch (Exception ignored) { return NativeEngine.empty(404); }
+                    }
+                }
+                return NativeEngine.empty(404);
+            }
             if (path.startsWith("/api/thumb/")) return engine.thumbnail(path.substring("/api/thumb/".length()), "short".equals(uri.getQueryParameter("t")));
             String asset = path.equals("/") ? "index.html" : path.substring(1);
             String mime = asset.endsWith(".html") ? "text/html" :

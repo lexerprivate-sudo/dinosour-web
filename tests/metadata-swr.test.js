@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+// shortInfo and its cache moved to public/playback-core.js (bundle split);
+// the assertions are unchanged, only the source file was re-pointed.
+const source = await readFile(new URL('../public/playback-core.js', import.meta.url), 'utf8');
 const start = source.indexOf('const shortInfo =');
 const end = source.indexOf('\n};', start) + 3;
 

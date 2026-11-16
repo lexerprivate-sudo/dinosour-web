@@ -3,6 +3,7 @@ import { selectAudioFormats, audioTrackGroups } from './native/audio-formats.js'
 
 const cache = new Map();
 const videoId = value => /^[\w-]{11}$/.test(value || '');
+const sizeOf = format => format?.filesize || format?.filesize_approx || null;
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
 });
@@ -29,9 +30,11 @@ export function normalizeVideo(info) {
   const qualities = formats.filter(f => f.vcodec?.startsWith('avc1') && height(f) > 0 && height(f) <= 1080)
     .sort((a, b) => height(b) - height(a) || (b.tbr || 0) - (a.tbr || 0))
     .filter(f => !seen.has(height(f)) && seen.add(height(f)))
-    .map(f => ({ label: `${height(f)}p`, height: height(f), src: f.url, separateAudio: f.acodec === 'none' }));
+    .map(f => ({ label: `${height(f)}p`, height: height(f), src: f.url, separateAudio: f.acodec === 'none', size: sizeOf(f) }));
   const audio = selectAudioFormats(formats);
   if (!qualities.length || (qualities.every(q => q.separateAudio) && !audio.length)) throw new Error('No compatible public stream is available for this video.');
+  // The standalone downloader reads `audioSize` alongside the `audio` URL.
+  const audioSize = audio[0] ? sizeOf(audio[0]) : null;
   const captions = [];
   const englishCaption = language => /^en([-_][a-z0-9-]*)?$/i.test(String(language || ''));
   for (const [automatic, tracks] of [[false, info.subtitles || {}], [true, info.automatic_captions || {}]]) {
@@ -48,10 +51,16 @@ export function normalizeVideo(info) {
     id: info.id, title: info.title || 'YouTube video', channel: info.uploader || info.channel || 'YouTube',
     duration: info.duration || 0, views: info.view_count, published: info.upload_date || '',
     description: info.description || '', thumb: `/api/thumb/${info.id}`,
-    qualities, audio: audio[0]?.url || null, audioFallbacks: audio.slice(1, 3).map(f => f.url),
-    audioTracks: audioTrackGroups(formats).map(({ formats: tracks, ...group }) => ({
-      ...group, src: tracks[0].url, fallbacks: tracks.slice(1).map(f => f.url),
-    })),
+    qualities, audio: audio[0]?.url || null, audioSize, audioFallbacks: audio.slice(1, 3).map(f => f.url),
+    audioTracks: audioTrackGroups(formats).map(({ formats: tracks, ...group }) => {
+      const size = sizeOf(tracks[0]);
+      return {
+        ...group, src: tracks[0].url, fallbacks: tracks.slice(1).map(f => f.url),
+        ...(size === null ? {} : { size }),
+        // Mirrors the browser server payload: one size per source format.
+        sizes: tracks.map(f => sizeOf(f)),
+      };
+    }),
     captions,
   };
 }
@@ -117,6 +126,32 @@ export async function handleRequest(url, signal) {
           const body = await response.json();
           return { suggestions: Array.isArray(body?.[1]) ? body[1].filter(v => typeof v === 'string').slice(0, 10) : [] };
         });
+        break;
+      }
+      case '/api/download': {
+        const id = params.get('id');
+        if (!videoId(id)) return json({ error: 'Invalid YouTube video ID.' }, 400);
+        let height = Number.parseInt(params.get('height') ?? '-1', 10);
+        if (!Number.isFinite(height)) height = -1;
+        data = await window.__dinosourNativeCall('download', { id, height });
+        break;
+      }
+      case '/api/download-stat': {
+        const id = params.get('id');
+        if (!videoId(id)) return json({ error: 'Invalid YouTube video ID.' }, 400);
+        data = await window.__dinosourNativeCall('download-stat', { id });
+        break;
+      }
+      case '/api/download-cancel': {
+        const id = params.get('id');
+        if (!videoId(id)) return json({ error: 'Invalid YouTube video ID.' }, 400);
+        data = await window.__dinosourNativeCall('download-cancel', { id });
+        break;
+      }
+      case '/api/download-delete': {
+        const id = params.get('id');
+        if (!videoId(id)) return json({ error: 'Invalid YouTube video ID.' }, 400);
+        data = await window.__dinosourNativeCall('download-delete', { id });
         break;
       }
       default: return json({ error: 'Not found.' }, 404);

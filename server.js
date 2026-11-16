@@ -381,6 +381,7 @@ async function getVideo(id) {
     const audio = audioFormats[0];
     const audioTracks = audioTrackGroups(formats).map(({ formats: tracks, ...group }) => ({
       ...group, tickets: tracks.map(f => ticket(f, f.http_headers || info.http_headers)),
+      sizes: tracks.map(f => f.filesize || f.filesize_approx || null),
     }));
     const captions = [];
     const englishCaption = language => /^en([-_][a-z0-9-]*)?$/i.test(String(language || ''));
@@ -405,11 +406,13 @@ async function getVideo(id) {
     const qualities = video.filter(f => !heights.has(qualityOf(f)) && heights.add(qualityOf(f))).map(f => ({
       label: `${qualityOf(f)}p`, height: qualityOf(f), ticket: ticket(f, f.http_headers || info.http_headers),
       separateAudio: f.acodec === 'none',
+      size: f.filesize || f.filesize_approx || null,
     }));
     if (!qualities.length || (qualities.every(f => f.separateAudio) && !audio)) throw new Error('No compatible public stream is available for this video.');
     return {
       ...normalize(info), qualities,
       audio: audio ? ticket(audio, audio.http_headers || info.http_headers) : null,
+      audioSize: audio ? (audio.filesize || audio.filesize_approx || null) : null,
       audioFallbacks: audioFormats.slice(1, 3).map(f => ticket(f, f.http_headers || info.http_headers)),
       audioTracks, captions,
     };
@@ -676,6 +679,8 @@ const server = http.createServer(async (req, res) => {
     const files = {
       '/': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
       '/app.js': ['app.js', 'text/javascript; charset=utf-8', 'no-cache'],
+      '/reel.js': ['reel.js', 'text/javascript; charset=utf-8', 'no-cache'],
+      '/playback-core.js': ['playback-core.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/native.js': ['native.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/startup.js': ['startup.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/style.css': ['style.css', 'text/css; charset=utf-8', 'no-cache'],
@@ -685,6 +690,7 @@ const server = http.createServer(async (req, res) => {
       '/icons/icon-192.png': ['icons/icon-192.png', 'image/png', 'public, max-age=604800'],
       '/icons/icon-512.png': ['icons/icon-512.png', 'image/png', 'public, max-age=604800'],
       '/icons/icon-maskable-512.png': ['icons/icon-maskable-512.png', 'image/png', 'public, max-age=604800'],
+      '/icons/icon-maskable-192.png': ['icons/icon-maskable-192.png', 'image/png', 'public, max-age=604800'],
       '/icons/apple-touch-icon.png': ['icons/apple-touch-icon.png', 'image/png', 'public, max-age=604800'],
       '/icons/favicon-32.png': ['icons/favicon-32.png', 'image/png', 'public, max-age=604800'],
     };
