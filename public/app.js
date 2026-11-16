@@ -1,4 +1,5 @@
 import { $, icon, escape, views, api, toast, preferences, savePreferences, replacePreferences, shortsSession, isMetered, shortInfo, preferredAudio, bufferedAhead } from './playback-core.js';
+import { LocalDownloads } from '/downloads.js';
 const main = $('#main');
 const key = 'dinosour.library.v1';
 let library;
@@ -10,6 +11,7 @@ let browsePrepareTimer, browsePreparing = false;
 const autoRetryCount = new Map();
 let generation = 0, cleanup = () => {};
 let playbackBusy = false, playbackBufferAhead = Infinity, miniSession = null;
+let downloadsTimer = null;
 function allowPrefetch() {
   return !playbackBusy && playbackBufferAhead >= 3 && !isMetered();
 }
@@ -51,6 +53,8 @@ function persist() {
   try { localStorage.setItem(key, JSON.stringify(library)); } catch { toast('Device storage is full; changes could not be saved.'); }
 }
 persist();
+// Resume any download that was in flight when the app last closed.
+syncDownloadWatchers();
 function duration(seconds) {
   if (!seconds) return '';
   const s = Math.floor(seconds);
@@ -327,12 +331,166 @@ function refreshLibraryView() {
   else return;
   window.scrollTo(0, y);
 }
+// Downloads keep moving while the app is open — poll the local engine once a
+// second and fold finished transfers into the library. One shared timer, only
+// while something is actually downloading.
+function syncDownloadWatchers() {
+  const active = (library.downloads || []).filter(d => d.state === 'downloading');
+  if (!active.length) { clearInterval(downloadsTimer); downloadsTimer = null; return; }
+  if (downloadsTimer) return;
+  downloadsTimer = setInterval(() => {
+    const remaining = (library.downloads || []).filter(d => d.state === 'downloading');
+    if (!remaining.length) { clearInterval(downloadsTimer); downloadsTimer = null; return; }
+    for (const entry of remaining) refreshDownloadState(entry);
+  }, 1000);
+}
+function refreshDownloadState(entry) {
+  LocalDownloads.stat(entry.id).then(stat => {
+    if (!stat) return;
+    if (stat.state === 'done') {
+      entry.state = 'done';
+      entry.videoBytes = Number(stat.videoBytes) || 0;
+      entry.audioBytes = Number(stat.audioBytes) || 0;
+      entry.bytes = entry.videoBytes + entry.audioBytes;
+      entry.downloadedAt = Date.now();
+      persist(); syncDownloadWatchers();
+      if (location.hash === '#library' || location.hash.startsWith('#downloads') || location.hash === '#watch=' + entry.id || location.hash.startsWith('#collection=')) refreshLibraryView();
+      if (document.querySelector('[data-download-toggle]')) paintDownloadControls(entry.id);
+      toast('Downloaded — watch offline any time');
+    } else if (stat.state === 'failed' && entry.state !== 'failed') {
+      entry.state = 'failed';
+      persist(); syncDownloadWatchers();
+      refreshLibraryView();
+      if (document.querySelector('[data-download-toggle]')) paintDownloadControls(entry.id);
+      toast('Download failed. Tap Download to try again.');
+    }
+  }).catch(() => {});
+}
+function synthesizeOfflineInfo(id, entry, urls) {
+  const known = videos.get(id);
+  return {
+    id,
+    title: known?.title || entry.title || 'Offline video',
+    channel: known?.channel || entry.channel || 'YouTube',
+    duration: entry.duration || known?.duration || 0,
+    views: known?.views ?? null,
+    viewsText: known?.viewsText || '',
+    published: '',
+    description: 'Downloaded on this device. This video plays offline.',
+    thumb: entry.thumb || `/api/thumb/${id}`,
+    qualities: [{ label: `${entry.qualityHeight || 'Offline'}p (offline)`, height: entry.qualityHeight || 0, src: urls.video, separateAudio: Boolean(urls.audio), size: entry.videoBytes || null }],
+    audio: urls.audio || null,
+    audioFallbacks: [],
+    audioTracks: [],
+    audioSize: entry.audioBytes || null,
+    captions: [],
+  };
+}
+let downloadsWatchInfo = null, activeObjectUrls = [];
+function paintDownloadControls(id) {
+  const entry = (library.downloads || []).find(d => d.id === id);
+  const btn = document.querySelector('#download-toggle');
+  if (btn) {
+    const done = entry?.state === 'done';
+    btn.classList.toggle('selected', done);
+    btn.setAttribute('aria-pressed', String(done));
+    if (done) { btn.innerHTML = `${icon('check')}Downloaded`; btn.title = 'Downloaded — plays offline'; }
+    else if (entry?.state === 'downloading') { btn.innerHTML = `${icon('download')}Downloading…`; btn.title = 'Downloading on this device…'; }
+    else if (entry?.state === 'failed') { btn.innerHTML = `${icon('download')}Retry download`; btn.title = 'Download failed — try again'; }
+    else { btn.innerHTML = `${icon('download')}Download`; btn.title = 'Download for offline playback'; }
+  }
+  const del = document.querySelector('#delete-download');
+  if (del) del.hidden = entry?.state !== 'done';
+}
+function ensureDownloadDialog() {
+  let dialog = document.querySelector('#download-dialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'download-dialog'; dialog.className = 'backup-dialog download-dialog';
+  dialog.innerHTML = `<div class="dialog-heading"><h2>Download video</h2><button class="icon-button" id="download-close" type="button" aria-label="Close">${icon('close')}</button></div><p class="backup-intro">Pick a quality. Dinosour stores the video and its audio on this device so you can watch without a connection. Sizes are estimates.</p><div class="download-quality-list" id="download-quality-list"></div><div class="dialog-actions"><button id="download-cancel" type="button">Close</button></div>`;
+  document.body.append(dialog);
+  dialog.querySelector('#download-close').onclick = () => dialog.close();
+  dialog.querySelector('#download-cancel').onclick = () => dialog.close();
+  return dialog;
+}
+function openDownloadDialog(id, info) {
+  const dialog = ensureDownloadDialog();
+  const list = dialog.querySelector('#download-quality-list');
+  const downloaded = (library.downloads || []).find(d => d.id === id);
+  const audioSize = info?.audioSize;
+  const audioLabel = audioSize ? ` + ${formatBytes(audioSize)} audio` : '';
+  list.innerHTML = info?.qualities?.length
+    ? info.qualities.map((q, index) => {
+        const active = downloaded?.state === 'done' && q.height === downloaded.qualityHeight;
+        return `<button class="save-row" data-download-quality="${index}" aria-pressed="${active}"><span class="save-row-icon">${icon(active ? 'check' : 'download')}</span><span class="save-row-text">${escape(q.label)}${active ? ' · Downloaded' : ''}<small>${formatBytes(q.size)} video${audioLabel}</small></span><span class="save-state ${active ? 'on' : ''}">${icon(active ? 'check' : 'plus')}</span></button>`;
+      }).join('')
+    : '<p class="save-to-empty">Quality information is unavailable for this video right now. Try again when you are online.</p>';
+  list.onclick = event => {
+    const row = event.target.closest('[data-download-quality]');
+    if (!row) return;
+    const quality = info.qualities[Number(row.dataset.downloadQuality)];
+    if (quality) startDownload(id, info, quality);
+  };
+  dialog.showModal();
+}
+function startDownload(id, info, quality) {
+  const entry = {
+    id, title: info.title, channel: info.channel, duration: info.duration || 0,
+    thumb: info.thumb || `/api/thumb/${id}`,
+    qualityHeight: quality.height, qualityLabel: quality.label,
+    videoBytes: 0, audioBytes: 0, bytes: 0, downloadedAt: 0, state: 'downloading',
+  };
+  library.downloads = [entry, ...(library.downloads || []).filter(d => d.id !== id)];
+  persist();
+  paintDownloadControls(id);
+  syncDownloadWatchers();
+  ensureDownloadDialog().close();
+  LocalDownloads.start({ id, info, height: quality.height }).catch(error => {
+    entry.state = 'failed';
+    persist(); syncDownloadWatchers(); paintDownloadControls(id); refreshLibraryView();
+    toast(error?.message || 'Download failed. Check your connection and try again.');
+  });
+  toast('Download started');
+  return entry;
+}
+const formatBytes = bytes => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'size unknown';
+  const gb = bytes / 1073741824;
+  if (gb >= 1) return `${gb >= 10 ? Math.round(gb) : gb.toFixed(1)} GB`;
+  const mb = bytes / 1048576;
+  return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
+};
+function cleanDownload(item) {
+  if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[\w-]{11}$/.test(item.id)) return null;
+  const text = (v, l) => typeof v === 'string' ? v.trim().slice(0, l) : '';
+  const num = (v, max) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.min(max, n) : 0; };
+  const clean = { id: item.id };
+  clean.title = text(item.title, 300) || 'YouTube video';
+  clean.channel = text(item.channel, 120) || 'YouTube';
+  const thumb = text(item.thumb, 500);
+  clean.thumb = thumb && (/^\/(?!\/)/.test(thumb) || /^https:\/\//i.test(thumb)) ? thumb : `/api/thumb/${item.id}`;
+  if (item.type === 'short') clean.type = 'short';
+  clean.duration = num(item.duration, 864000);
+  clean.position = num(item.position, 864000);
+  clean.qualityHeight = num(item.qualityHeight, 4320);
+  clean.videoBytes = num(item.videoBytes, Number.MAX_SAFE_INTEGER);
+  clean.audioBytes = num(item.audioBytes, Number.MAX_SAFE_INTEGER);
+  clean.bytes = num(item.bytes, Number.MAX_SAFE_INTEGER) || clean.videoBytes + clean.audioBytes;
+  clean.downloadedAt = num(item.downloadedAt, Number.MAX_SAFE_INTEGER) || Date.now();
+  clean.state = ['done', 'downloading', 'failed'].includes(item.state) ? item.state : 'failed';
+  return clean;
+}
 function compactVideo(id) {
   const known = videos.get(id);
   if (known) return compact(known);
   const title = $('.watch-title')?.textContent?.trim().slice(0, 300) || 'YouTube video';
   const channel = $('.watch-actions .channel strong')?.textContent?.trim().slice(0, 120) || 'YouTube';
   return { id, title, channel, thumb: `/api/thumb/${id}`, type: location.hash.startsWith('#short=') ? 'short' : undefined };
+}
+function downloadsSection(downloads) {
+  if (!downloads.length) return '';
+  const totalBytes = downloads.reduce((n, d) => n + (d.bytes || 0), 0);
+  return `<section class="library-section" id="downloads" aria-labelledby="downloads-title"><div class="library-section-head"><h2 id="downloads-title">Downloads<span class="library-count">${downloads.length}</span></h2><p class="library-bytes">${escape(formatBytes(totalBytes))} stored on this device</p></div><div class="library-rail">${downloads.slice(0, 12).map(item => `<div class="collection-item"><button class="collection-remove" data-delete-download="${item.id}" aria-label="Delete the downloaded video ${escape(item.title)}" title="Delete download">${icon('trash')}</button>${card(item)}</div>`).join('')}</div></section>`;
 }
 function sectionRail(id, title, items, clearable) {
   if (!items.length) return '';
@@ -349,10 +507,10 @@ function libraryPage() {
   currentCollectionId = null;
   document.title = 'Library — Dinosour';
   main.className = 'library-page';
-  const saved = library.saved, liked = library.liked, collections = library.collections;
-  const total = saved.length + liked.length + collections.reduce((n, c) => n + c.items.length, 0);
-  const hasAnything = saved.length || liked.length || collections.length;
-  main.innerHTML = `<div class="collection-heading"><div><h1>Library</h1><p>${hasAnything ? `${total} ${total === 1 ? 'video' : 'videos'} · Saved on this device` : 'Everything you keep, in one place'}</p></div><div class="collection-actions"><button data-backup>${icon('save')}Backup</button><button class="primary" data-new-collection>${icon('plus')}New collection</button></div></div>${sectionRail('watch-later', 'Watch later', saved, 'saved')}${sectionRail('liked-videos', 'Liked videos', liked, 'liked')}<section class="library-section" id="collections" aria-labelledby="collections-title"><div class="library-section-head"><h2 id="collections-title">Your collections<span class="library-count">${collections.length}</span></h2></div><div class="collection-grid">${collections.map(collectionCard).join('')}<button class="collection-card collection-new" data-new-collection><span class="collection-new-icon">${icon('plus')}</span><span class="collection-new-label">New collection</span><span class="collection-new-hint">Gather the videos you love</span></button></div></section>`;
+  const saved = library.saved, liked = library.liked, collections = library.collections, downloads = library.downloads || [];
+  const total = saved.length + liked.length + downloads.length + collections.reduce((n, c) => n + c.items.length, 0);
+  const hasAnything = saved.length || liked.length || downloads.length || collections.length;
+  main.innerHTML = `<div class="collection-heading"><div><h1>Library</h1><p>${hasAnything ? `${total} ${total === 1 ? 'video' : 'videos'} · Saved on this device` : 'Everything you keep, in one place'}</p></div><div class="collection-actions"><button data-backup>${icon('save')}Backup</button><button class="primary" data-new-collection>${icon('plus')}New collection</button></div></div>${sectionRail('watch-later', 'Watch later', saved, 'saved')}${sectionRail('liked-videos', 'Liked videos', liked, 'liked')}${downloadsSection(downloads)}<section class="library-section" id="collections" aria-labelledby="collections-title"><div class="library-section-head"><h2 id="collections-title">Your collections<span class="library-count">${collections.length}</span></h2></div><div class="collection-grid">${collections.map(collectionCard).join('')}<button class="collection-card collection-new" data-new-collection><span class="collection-new-icon">${icon('plus')}</span><span class="collection-new-label">New collection</span><span class="collection-new-hint">Gather the videos you love</span></button></div></section>`;
   prepareVisibleMetadata();
 }
 function collectionDetail(id) {
@@ -704,7 +862,9 @@ const backupPreferenceKeys = ['theme', 'collapsed', 'volume', 'muted', 'qualityH
 function backupPayload() {
   const chosen = {};
   for (const field of backupPreferenceKeys) if (preferences[field] !== undefined) chosen[field] = preferences[field];
-  return { app: 'dinosour', version: 1, exportedAt: new Date().toISOString(), library, preferences: chosen };
+  // Downloads are device-local media; they cannot travel inside a JSON backup.
+  const { downloads: _downloads, ...portableLibrary } = library;
+  return { app: 'dinosour', version: 1, exportedAt: new Date().toISOString(), library: portableLibrary, preferences: chosen };
 }
 function cleanLibraryItem(item) {
   if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[\w-]{11}$/.test(item.id)) return null;
@@ -757,6 +917,11 @@ function sanitizeLibrary(source) {
   clean.collections = collections.map(cleanCollection)
     .filter(collection => collection && !seenCollections.has(collection.id) && seenCollections.add(collection.id))
     .slice(0, 50);
+  const downloads = Array.isArray(source?.downloads) ? source.downloads : [];
+  const seenDownloads = new Set();
+  clean.downloads = downloads.map(cleanDownload)
+    .filter(item => item && !seenDownloads.has(item.id) && seenDownloads.add(item.id))
+    .slice(0, 500);
   return clean;
 }
 function sanitizeBackup(data) {
@@ -792,11 +957,13 @@ function mergeLibrary(current, incoming) {
     collections.set(collection.id, { ...existing, name: existing.name || collection.name, items: [...mergedItems.values()].slice(0, 500) });
   }
   merged.collections = [...collections.values()].slice(0, 50);
+  merged.downloads = Array.isArray(current.downloads) ? current.downloads : [];
   return merged;
 }
 function applyBackup(data, replace) {
   const clean = sanitizeBackup(data);
-  library = replace ? clean.library : mergeLibrary(library, clean.library);
+  const safe = replace ? { ...clean.library, downloads: Array.isArray(library.downloads) ? library.downloads : [] } : null;
+  library = replace ? safe : mergeLibrary(library, clean.library);
   replacePreferences(replace ? { ...preferences, ...clean.preferences } : {
     ...preferences,
     ...clean.preferences,
@@ -1035,6 +1202,9 @@ async function watch(id, current, controller, refresh) {
     clearInterval(statsTimer); clearInterval(bufferTimer); $('#stats-dialog')?.remove();
     playbackBusy = false; playbackBufferAhead = Infinity;
     captionRequest++; if (captionBlob) URL.revokeObjectURL(captionBlob);
+    for (const url of activeObjectUrls) URL.revokeObjectURL?.(url);
+    activeObjectUrls = [];
+    downloadsWatchInfo = null;
     warmed?.controller.abort();
     video.pause(); audio.pause();
     video.removeAttribute('src'); audio.removeAttribute('src'); video.load(); audio.load();
@@ -1076,10 +1246,19 @@ async function watch(id, current, controller, refresh) {
     finally { retrying = false; }
   };
   video.onerror = () => retryPlayback('The video stream was interrupted.');
+  // Prefer a completed local copy — no network at all, instant, works offline.
+  const downloadsEntry = (library.downloads || []).find(d => d.id === id);
+  let localUrls = null;
+  activeObjectUrls = [];
+  if (downloadsEntry?.state === 'done') {
+    try { const urls = await LocalDownloads.objectUrls(id); if (urls?.done) { localUrls = urls; activeObjectUrls = [urls.video, urls.audio].filter(Boolean); } } catch { /* fall back to network streams */ }
+  }
   try {
-    info = warmed
-      ? await warmed.promise.catch(() => api(`/api/video?id=${id}`, controller.signal))
-      : await shortInfo(id, controller.signal, refresh);
+    info = localUrls
+      ? synthesizeOfflineInfo(id, downloadsEntry, localUrls)
+      : warmed
+        ? await warmed.promise.catch(() => api(`/api/video?id=${id}`, controller.signal))
+        : await shortInfo(id, controller.signal, refresh);
     metadataMs = performance.now() - watchStarted;
     if (current !== generation) return;
     remember(info);
@@ -1089,8 +1268,10 @@ async function watch(id, current, controller, refresh) {
     const savedPosition = sessionStorage.getItem(restartKey) ? 0 : (library.history.find(v => v.id === id)?.position || 0);
     sessionStorage.removeItem(restartKey);
     setMediaMetadata(info.title, info.channel);
-    $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="save-to">${icon('library')}Save to…</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
+    $('#watch-info').innerHTML = `<h1 class="watch-title">${escape(info.title)}</h1><div class="watch-actions"><div class="channel"><span class="avatar">${escape(info.channel[0])}</span><div><strong>${escape(info.channel)}</strong><span>YouTube channel</span></div></div><button id="like" aria-pressed="${library.liked.some(v => v.id === id)}" class="${library.liked.some(v => v.id === id) ? 'selected' : ''}">${icon('like')}Like</button><button id="save" aria-pressed="${library.saved.some(v => v.id === id)}" class="${library.saved.some(v => v.id === id) ? 'selected' : ''}">${icon('save')}Save</button><button id="save-to">${icon('library')}Save to…</button><button id="download-toggle" data-download-toggle="${id}" aria-label="Download this video for offline playback" title="Download for offline playback">${icon('download')}Download</button><button id="delete-download" data-delete-download="${id}" class="icon-button" aria-label="Delete downloaded video" title="Delete download" hidden>${icon('trash')}</button><button id="share">${icon('share')}Share</button></div><div class="player-tools"><span>Playback</span><div class="volume-control"><button type="button" id="mute-toggle" class="volume-button" aria-label="Mute" title="Mute">${icon('volume')}</button><input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div><label>Quality <select id="quality" aria-label="Video quality">${qualityOptions(info)}</select></label><label>Speed <select id="speed" aria-label="Playback speed">${speedOptions()}</select></label></div><div class="description"><p><strong>${views(info.views)}${info.published ? ` · ${escape(info.published.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))}` : ''}</strong></p><p class="description-preview">${escape((info.description || 'No description available.').split('\n').filter(Boolean).slice(0, 2).join('\n'))}</p><details><summary>Show more</summary><p>${escape(info.description || 'No description available.')}</p><p class="playback-note">Direct playback of public videos. Creator sponsorships within videos remain. Restricted videos and live streams may be unavailable.</p></details></div><p class="shortcuts">Space to pause · ← / → to seek · F for fullscreen</p>`;
     bindInfoActions(id);
+    downloadsWatchInfo = info;
+    paintDownloadControls(id);
     library.queue = library.queue.filter(v => v.id !== id); persist();
     $('.watch-related').insertAdjacentHTML('afterbegin', '<section id="watch-queue"></section>');
     renderQueue();
@@ -1647,6 +1828,21 @@ document.addEventListener('click', event => {
   }
   const saveTo = event.target.closest('[data-save-to]');
   if (saveTo) { event.preventDefault(); openSaveToDialog(saveTo.dataset.saveTo); return; }
+  const downloadToggle = event.target.closest('[data-download-toggle]');
+  if (downloadToggle) { event.preventDefault(); openDownloadDialog(downloadToggle.dataset.downloadToggle, downloadsWatchInfo); return; }
+  const deleteDownloadButton = event.target.closest('[data-delete-download]');
+  if (deleteDownloadButton) {
+    event.preventDefault();
+    const id = deleteDownloadButton.dataset.deleteDownload;
+    LocalDownloads.delete(id).catch(() => {}).finally(() => {
+      library.downloads = (library.downloads || []).filter(d => d.id !== id);
+      persist();
+      toast('Download deleted');
+      refreshLibraryView();
+      paintDownloadControls(id);
+    });
+    return;
+  }
   const newCollectionButton = event.target.closest('[data-new-collection]');
   if (newCollectionButton) { event.preventDefault(); openCollectionDialog('create'); return; }
   const renameCollectionButton = event.target.closest('[data-rename-collection]');

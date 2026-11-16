@@ -18,6 +18,7 @@
                     "test:browser":  "node tests/browser.mjs",
                     "test:pwa":  "node tests/pwa-browser.mjs",
                     "test:feed":  "node tests/feed.mjs",
+                    "test:downloads":  "node tests/downloads.mjs",
                     "test:library":  "node tests/library.mjs",
                     "test:recovery":  "node tests/recovery.mjs",
                     "test:shorts":  "node tests/shorts.mjs",

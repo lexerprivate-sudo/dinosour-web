@@ -717,3 +717,6 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 }
 .collection-actions .primary { background: var(--text); color: var(--bg); border: 0; }
 .collection-actions .primary:hover { filter: brightness(.92); }
+.library-bytes { font-size: 13px; color: var(--muted); margin: 0; }
+.download-quality-list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; margin-top: 12px; }
+.download-quality-list .save-row[aria-pressed="true"] { background: rgba(62, 166, 255, .12); }
