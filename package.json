@@ -1,44 +1,46 @@
 {
-  "name": "dinosour",
-  "version": "1.1.9",
-  "private": true,
-  "type": "module",
-  "main": "desktop/main.cjs",
-  "author": "Dinosour",
-  "description": "A local, account-free YouTube viewer",
-  "scripts": {
-    "start": "node server.js --open",
-    "serve": "node server.js",
-    "share": "node share.mjs",
-    "share:stable": "node share.mjs --provider=tailscale",
-    "share:rotate": "node share.mjs --rotate-code",
-    "check": "npx eslint public/ && node --check server.js && node --check youtube-search.js && node --check public/startup.js && node --check public/app.js && node --check public/native.js && node --check public/native-api.js && node --check public/sw.js && node --check media-chunks.js && node --check audio-formats.js",
-    "test": "node --test tests/*.test.js",
-    "test:browser": "node tests/browser.mjs",
-    "test:pwa": "node tests/pwa-browser.mjs",
-    "test:feed": "node tests/feed.mjs",
-    "test:recovery": "node tests/recovery.mjs",
-    "test:shorts": "node tests/shorts.mjs",
-    "test:prefetch": "node tests/prefetch.mjs",
-    "test:watch-prefetch": "node tests/watch-prefetch.mjs",
-    "test:playback-features": "node tests/playback-features.mjs",
-    "test:features": "node tests/features.mjs",
-    "test:native": "node tests/native.mjs",
-    "test:startup": "node tests/startup.mjs",
-    "build:android": "cd android && gradlew.bat assembleRelease",
-    "desktop": "electron .",
-    "prepare:desktop": "node desktop/prepare.mjs",
-    "build:desktop": "npm run prepare:desktop && electron-builder --config electron-builder.json --win --x64",
-    "test:desktop": "node tests/desktop.mjs"
-  },
-  "engines": {
-    "node": ">=22"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.65.0",
-    "electron": "45.3.2",
-    "electron-builder": "26.18.0",
-    "eslint": "^10.15.0"
-  },
-  "license": "GPL-3.0-only"
+    "name":  "dinosour",
+    "version":  "1.1.9",
+    "private":  true,
+    "type":  "module",
+    "main":  "desktop/main.cjs",
+    "author":  "Dinosour",
+    "description":  "A local, account-free YouTube viewer",
+    "scripts":  {
+                    "start":  "node server.js --open",
+                    "serve":  "node server.js",
+                    "share":  "node share.mjs",
+                    "share:stable":  "node share.mjs --provider=tailscale",
+                    "share:rotate":  "node share.mjs --rotate-code",
+                    "check":  "npx eslint public/ \u0026\u0026 node --check server.js \u0026\u0026 node --check youtube-search.js \u0026\u0026 node --check public/startup.js \u0026\u0026 node --check public/app.js \u0026\u0026 node --check public/native.js \u0026\u0026 node --check public/native-api.js \u0026\u0026 node --check public/sw.js \u0026\u0026 node --check media-chunks.js \u0026\u0026 node --check audio-formats.js \u0026\u0026 npm run check:sw",
+                    "check:sw":  "node --test tests/sw-consistency.mjs",
+                    "test":  "node --test tests/*.test.js",
+                    "test:browser":  "node tests/browser.mjs",
+                    "test:pwa":  "node tests/pwa-browser.mjs",
+                    "test:feed":  "node tests/feed.mjs",
+                    "test:library":  "node tests/library.mjs",
+                    "test:recovery":  "node tests/recovery.mjs",
+                    "test:shorts":  "node tests/shorts.mjs",
+                    "test:prefetch":  "node tests/prefetch.mjs",
+                    "test:watch-prefetch":  "node tests/watch-prefetch.mjs",
+                    "test:playback-features":  "node tests/playback-features.mjs",
+                    "test:features":  "node tests/features.mjs",
+                    "test:native":  "node tests/native.mjs",
+                    "test:startup":  "node tests/startup.mjs",
+                    "build:android":  "cd android \u0026\u0026 gradlew.bat assembleRelease",
+                    "desktop":  "electron .",
+                    "prepare:desktop":  "node desktop/prepare.mjs",
+                    "build:desktop":  "npm run prepare:desktop \u0026\u0026 electron-builder --config electron-builder.json --win --x64",
+                    "test:desktop":  "node tests/desktop.mjs"
+                },
+    "engines":  {
+                    "node":  "\u003e=22"
+                },
+    "devDependencies":  {
+                            "@playwright/test":  "^1.65.0",
+                            "electron":  "45.3.2",
+                            "electron-builder":  "26.18.0",
+                            "eslint":  "^10.15.0"
+                        },
+    "license":  "GPL-3.0-only"
 }

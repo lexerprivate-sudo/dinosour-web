@@ -8,12 +8,13 @@ try { library = JSON.parse(localStorage.getItem(key)); } catch { library = null;
 if (!library || typeof library !== 'object' || Array.isArray(library)) library = {};
 library = sanitizeLibrary(library);
 const videos = new Map();
-const infoCache = new Map();
-const infoCacheTimes = new Map();
+const inflight = new Map();
+const resolved = new Map();
+const resolvedTimes = new Map();
 let browsePrepareTimer, browsePreparing = false;
 const autoRetryCount = new Map();
-let generation = 0, cleanup = () => {}, toastTimer, lastShortsQuery = '';
-let shortsFeed = [], shortsFeedCursor = '';
+let generation = 0, cleanup = () => {}, toastTimer;
+const shortsSession = { query: '', items: [], cursor: '', shuffled: false };
 let preferences = {};
 let playbackBusy = false, playbackBufferAhead = Infinity, miniSession = null;
 const isMetered = () => Boolean(navigator.connection?.saveData) || ['slow-2g', '2g'].includes(navigator.connection?.effectiveType || '');
@@ -192,8 +193,8 @@ async function feed(query, current, controller, mode = 'video') {
   const shorts = mode === 'shorts';
   const home = !query && !shorts;
   if (shorts) {
-    if (lastShortsQuery !== query) { shortsFeed = []; shortsFeedCursor = ''; }
-    lastShortsQuery = query;
+    if (shortsSession.query !== query) { shortsSession.items = []; shortsSession.cursor = ''; }
+    shortsSession.query = query;
   }
   const homeShorts = shorts && !query;
   const term = query || (shorts ? 'popular shorts' : 'beautiful nature science short films');
@@ -301,8 +302,8 @@ async function feed(query, current, controller, mode = 'video') {
       const fresh = data.videos.filter(v => { if (seen.has(v.id)) return false; seen.add(v.id); return true; });
       if (shorts) {
         $('#results').insertAdjacentHTML('beforeend', fresh.map(shortCard).join(''));
-        for (const v of data.videos) if (!shortsFeed.some(item => item.id === v.id)) shortsFeed.push(v);
-        shortsFeedCursor = data.continuation || shortsFeedCursor;
+        for (const v of data.videos) if (!shortsSession.items.some(item => item.id === v.id)) shortsSession.items.push(v);
+        shortsSession.cursor = data.continuation || shortsSession.cursor;
       } else {
         allResults.push(...fresh);
         if (filters.sort === 'relevance') {
@@ -506,9 +507,9 @@ function renderSaveToList() {
   const list = $('#save-to-list');
   if (!list) return;
   const savedIn = library.saved.some(i => i.id === saveToVideoId);
-  list.innerHTML = `<button class="save-row" data-save-watch-later aria-pressed="${savedIn}"><span class="save-row-icon">${icon('clock')}</span><span class="save-row-text">Watch later<small>${library.saved.length} ${library.saved.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${savedIn ? 'on' : ''}">${icon(savedIn ? 'check' : 'plus')}</span></button>${library.collections.map(c => {
+  list.innerHTML = `<button class="save-row" data-save-watch-later aria-pressed="${savedIn}"><span class="save-row-icon">${icon('clock')}</span><span class="save-row-text">Watch later<small>${library.saved.length} ${library.saved.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${savedIn ? 'on' : ''}" aria-hidden="true">${icon(savedIn ? 'check' : 'plus')}</span></button>${library.collections.map(c => {
     const inCollection = c.items.some(i => i.id === saveToVideoId);
-    return `<button class="save-row" data-save-collection="${c.id}" aria-pressed="${inCollection}"><span class="save-row-icon">${icon('library')}</span><span class="save-row-text">${escape(c.name)}<small>${c.items.length} ${c.items.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${inCollection ? 'on' : ''}">${icon(inCollection ? 'check' : 'plus')}</span></button>`;
+    return `<button class="save-row" data-save-collection="${c.id}" aria-pressed="${inCollection}"><span class="save-row-icon">${icon('library')}</span><span class="save-row-text">${escape(c.name)}<small>${c.items.length} ${c.items.length === 1 ? 'video' : 'videos'}</small></span><span class="save-state ${inCollection ? 'on' : ''}" aria-hidden="true">${icon(inCollection ? 'check' : 'plus')}</span></button>`;
   }).join('')}${library.collections.length === 0 ? '<p class="save-to-empty">No collections yet — create one below and this video goes straight in.</p>' : ''}`;
 }
 function openSaveToDialog(id) {
@@ -1511,28 +1512,51 @@ async function watch(id, current, controller, refresh) {
   }
 }
 
+const infoTtlMs = 120000, infoStaleMaxMs = 6 * 60 * 60 * 1000, infoCap = 20;
+// `inflight` holds id -> Promise for requests still loading; `resolved` holds
+// id -> info for finished requests. They are split so the identity guard can
+// key off the inflight entry alone.
 const shortInfo = (id, signal, refresh) => {
-  if (!refresh && infoCache.has(id) && Date.now() - infoCacheTimes.get(id) < 120000) return Promise.resolve(infoCache.get(id));
+  const now = Date.now();
+  if (!refresh) {
+    const info = resolved.get(id);
+    if (info) {
+      const age = now - (resolvedTimes.get(id) || 0);
+      if (age < infoStaleMaxMs) {
+        if (age >= infoTtlMs && !inflight.has(id)) {
+          // Stale-while-revalidate: serve the stale entry now and refresh in
+          // the background so the next caller gets fresh data.
+          shortInfo(id, undefined, true).catch(() => {});
+        }
+        // LRU: move the entry to the end on every access.
+        resolved.delete(id); resolved.set(id, info);
+        return Promise.resolve(info);
+      }
+      // Older than the stale window: drop it and fall through to a fetch.
+      resolved.delete(id); resolvedTimes.delete(id);
+    }
+    if (inflight.has(id)) return inflight.get(id);
+  }
   let request;
   request = api(`/api/video?id=${id}${refresh ? '&refresh=1' : ''}`, signal).then(info => {
     // An older prefetch may finish after a refresh. Only the current request
     // owns this cache entry; evicted requests must not reinsert themselves.
-    if (infoCache.get(id) === request) {
-      infoCache.set(id, info);
-      infoCacheTimes.set(id, Date.now());
+    if (inflight.get(id) === request) {
+      inflight.delete(id);
+      resolved.delete(id); resolved.set(id, info);
+      resolvedTimes.set(id, Date.now()); // Stamped at resolution, not at insertion.
+      if (resolved.size > infoCap) {
+        const oldest = resolved.keys().next().value;
+        resolved.delete(oldest); resolvedTimes.delete(oldest);
+      }
     }
     return info;
   });
   // Cache the in-flight request as well, so a concurrent prefetch or retry
   // cannot fall back to the old stream tickets while fresh metadata loads.
-  infoCache.set(id, request);
-  infoCacheTimes.set(id, Date.now());
-  if (infoCache.size > 20) {
-    const oldest = infoCache.keys().next().value;
-    infoCache.delete(oldest); infoCacheTimes.delete(oldest);
-  }
+  inflight.set(id, request);
   request.catch(() => {
-    if (infoCache.get(id) === request) { infoCache.delete(id); infoCacheTimes.delete(id); }
+    if (inflight.get(id) === request) inflight.delete(id);
   });
   return request;
 };
@@ -1558,12 +1582,12 @@ async function reel(id, current, controller) {
   const clearStatus = () => { status.innerHTML = ''; status.hidden = true; };
   const showStatus = html => { clearLoadHint(); status.innerHTML = html; status.hidden = false; };
 
-  const known = shortsFeed.some(v => v.id === id);
+  const known = shortsSession.items.some(v => v.id === id);
   // Deep-link into #short= without a feed-context: drop any stale topic list
   // and do a one-shot All-feed fetch so the reel shows the same feed the
   // Shorts button would have.
-  if (!known) { shortsFeed = []; shortsFeedCursor = ''; }
-  let list = shortsFeed.slice();
+  if (!known) { shortsSession.items = []; shortsSession.cursor = ''; }
+  let list = shortsSession.items.slice();
   if (!known) list.unshift({ id, title: 'YouTube Short', channel: 'YouTube Short', viewsText: '', thumb: `/api/thumb/${id}?t=short`, type: 'short' });
   let index = list.findIndex(v => v.id === id);
   let info = null, separate = false, disposed = false, syncTimer, lastSave = 0, loadToken = 0, loadHint;
@@ -1738,18 +1762,18 @@ async function reel(id, current, controller) {
   const refreshNav = () => {
     const prev = $('#reel-prev'), next = $('#reel-next');
     if (prev) prev.hidden = index <= 0;
-    if (next) next.disabled = index + 1 >= list.length && !shortsFeedCursor;
+    if (next) next.disabled = index + 1 >= list.length && !shortsSession.cursor;
   };
   const grow = async () => {
-    if (!shortsFeedCursor || growing || disposed) return;
+    if (!shortsSession.cursor || growing || disposed) return;
     growing = true;
     try {
-      const params = new URLSearchParams({ continuation: shortsFeedCursor });
-      if (lastShortsQuery) { params.set('q', lastShortsQuery); params.set('shorts', '1'); }
-      const data = await api(`${lastShortsQuery ? '/api/search' : '/api/shorts'}?${params}`, controller.signal);
+      const params = new URLSearchParams({ continuation: shortsSession.cursor });
+      if (shortsSession.query) { params.set('q', shortsSession.query); params.set('shorts', '1'); }
+      const data = await api(`${shortsSession.query ? '/api/search' : '/api/shorts'}?${params}`, controller.signal);
       if (disposed || current !== generation) return;
       for (const v of data.videos) if (!list.some(item => item.id === v.id)) list.push(v);
-      shortsFeedCursor = data.continuation || '';
+      shortsSession.cursor = data.continuation || '';
     } catch {}
     growing = false;
   };
@@ -1987,11 +2011,11 @@ async function reel(id, current, controller) {
     (async () => {
       try {
         const params = new URLSearchParams();
-        if (lastShortsQuery) { params.set('q', lastShortsQuery); params.set('shorts', '1'); }
-        const data = await api(`${lastShortsQuery ? '/api/search' : '/api/shorts'}?${params}`, controller.signal);
+        if (shortsSession.query) { params.set('q', shortsSession.query); params.set('shorts', '1'); }
+        const data = await api(`${shortsSession.query ? '/api/search' : '/api/shorts'}?${params}`, controller.signal);
         if (disposed || current !== generation) return;
-        for (const v of data.videos) if (!shortsFeed.some(item => item.id === v.id)) shortsFeed.push(v);
-        shortsFeedCursor = data.continuation || '';
+        for (const v of data.videos) if (!shortsSession.items.some(item => item.id === v.id)) shortsSession.items.push(v);
+        shortsSession.cursor = data.continuation || '';
         for (const v of data.videos) if (!list.some(item => item.id === v.id)) list.push(v);
         refreshNav();
         prefetchNext(list[index + 1]?.id);

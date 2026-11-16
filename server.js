@@ -675,7 +675,6 @@ const server = http.createServer(async (req, res) => {
     }
     const files = {
       '/': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
-      '/index.html': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
       '/app.js': ['app.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/native.js': ['native.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/startup.js': ['startup.js', 'text/javascript; charset=utf-8', 'no-cache'],

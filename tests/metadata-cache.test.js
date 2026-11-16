@@ -7,10 +7,11 @@ const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf
 const start = source.indexOf('const shortInfo =');
 const end = source.indexOf('\n};', start) + 3;
 
-test('late prefetch cannot replace refreshed tickets; failed refresh allows retry', async () => {
-  const pending = [], infoCache = new Map(), infoCacheTimes = new Map();
+test('late prefetch cannot replace refreshed tickets; failed refresh keeps stale data', async () => {
+  const pending = [], inflight = new Map(), resolved = new Map(), resolvedTimes = new Map();
   const context = vm.createContext({
-    infoCache, infoCacheTimes,
+    inflight, resolved, resolvedTimes,
+    infoTtlMs: 120000, infoStaleMaxMs: 6 * 60 * 60 * 1000, infoCap: 20,
     api: path => new Promise((resolve, reject) => pending.push({ path, resolve, reject })),
   });
   const shortInfo = vm.runInContext(source.slice(start, end) + '\nshortInfo;', context);
@@ -30,8 +31,11 @@ test('late prefetch cannot replace refreshed tickets; failed refresh allows retr
   const failed = shortInfo(id, undefined, true);
   pending[2].reject(new Error('Offline'));
   await assert.rejects(failed, /Offline/);
-  const retry = shortInfo(id);
-  assert.equal(pending.length, 4, 'a failed refresh must not poison subsequent requests');
+  const cached = shortInfo(id);
+  assert.equal(pending.length, 3, 'a failed refresh keeps the previously cached value');
+  assert.equal((await cached).ticket, 'fresh');
+  const retry = shortInfo(id, undefined, true);
+  assert.equal(pending.length, 4, 'an explicit refresh retries despite the failure');
   pending[3].resolve({ ticket: 'retry' });
   assert.equal((await retry).ticket, 'retry');
 });

@@ -118,7 +118,7 @@ function hideToTray() {
       { label: 'Open Dinosour', click: showWindow },
       { label: 'Quit Dinosour', click: () => app.quit() },
     ]));
-    tray.on('double-click', showWindow);
+    tray.on('double-click', toggleWindow);
   }
   window.hide();
   if (!trayHintShown) {
@@ -135,6 +135,15 @@ function showWindow() {
   if (!window) return;
   window.show();
   window.focus();
+}
+
+// Tray double-click toggles the window: hide it back to the tray when it is
+// up front, bring it back otherwise. A minimized window is restored instead.
+function toggleWindow() {
+  if (!window || window.isDestroyed() || quitting) return;
+  if (window.isMinimized()) { window.restore(); window.show(); window.focus(); return; }
+  if (window.isVisible()) { window.hide(); return; }
+  showWindow();
 }
 
 // ---------------------------------------------------------------------------

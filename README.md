@@ -508,11 +508,13 @@ What you need:
 - Internet and `npm ci` dependencies for build/release suites; the Android
   build output for `test:native` (`android/app/build/playbackEngine/yt-dlp`,
   run via Python 3.11+) and a built desktop install for `test:desktop`.
+- `npm run desktop` (`electron .`) exists as a dev-run convenience that launches the Electron shell from the repo without packaging an installer; `npm run build:desktop` remains the packaged build.
 
 Run, from the repository root:
 
 ```powershell
 npm run check
+npm run check:sw
 npm test
 npm run test:feed
 npm run test:recovery
@@ -536,6 +538,7 @@ Run `npm run test:startup` for stalled-network readiness and script-failure reco
 notifications using the Android bridge simulation; it stubs the Android origin
 and needs only Node and Chrome, with no network access.
 
+`npm run check:sw` validates the service-worker precache list: it checks the `CACHE` version format and confirms every `SHELL` entry in `public/sw.js` resolves to a real file under `public/`.
 `npm test` also checks the PWA manifest, icon dimensions and MIME types, the
 uncached service worker, `viewport-fit=cover`, and the safe-area CSS.
 `npm run test:pwa` registers the service worker in Chrome, verifies that the

@@ -125,6 +125,20 @@ paid content restrictions, no DRM work, no age-gate dodging.
   assembleRelease`), signed by the same key as every prior release.
 - `docs/RELEASE.md` — the publish runbook.
 
+## Environment variables
+
+| Name | What it does | Who sets it |
+|---|---|---|
+| `TUNNEL_PROVIDER` | Tunnel provider for `npm run share`: `auto` when unset, or `tailscale` / `cloudflared` / `none` (LAN only); the `--provider=` flag wins | Operator |
+| `CLOUDFLARED_PATH` | Path to a `cloudflared` executable; when set, `share.mjs` uses it instead of the one it downloads into `tools/` | Operator |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Token for a named Cloudflare tunnel; with a configured origin, `share.mjs` runs that named tunnel instead of a quick tunnel (`data/cloudflared-token.txt` is the fallback) | Operator |
+| `YTDLP_JS_RUNTIME` | Passed to yt-dlp as `--js-runtimes` (defaults to `node`); `desktop/main.cjs` sets it to `node:<Electron execPath>` | Desktop child process / operator |
+| `DINOSOUR_UPDATE_TEST` | Truthy value puts the desktop updater in test mode: the value is treated as the installed version and the downloaded installer is never spawned | Developer (updater dry-run) |
+| `DINOSOUR_TEST_PROFILE` | Overrides Electron's `userData` path so the desktop app runs against an isolated profile | `tests/desktop.mjs` (mkdtemp) |
+| `PYTHON_PATH` | Python interpreter used by `tests/native.mjs` to run the packaged yt-dlp | Operator / CI (defaults to `python` on PATH) |
+| `DESKTOP_EXE` | Path to the packaged `Dinosour Web.exe` that `tests/desktop.mjs` launches | Operator / CI (defaults to `dist/win-unpacked/Dinosour Web.exe`) |
+| `ACCESS_CODE` | Access code required for non-loopback requests; when set, `server.js` requires it and `share.mjs` passes it through to its server child (otherwise share generates/persists `data/access.json`) | Operator |
+
 ## Conventions
 
 - No new dependencies without arguing for them — the app ships dependency-free UI
