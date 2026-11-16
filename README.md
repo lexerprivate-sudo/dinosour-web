@@ -23,6 +23,14 @@ and runs the silent installer when the app next quits. Nothing is placed on
 the Desktop. "Check for desktop updates" in the Dinosour menu triggers the
 same flow on demand and offers an immediate restart.
 
+Already on an older desktop install such as 1.1.8? The self-updater above has
+shipped since 1.1.0, so **Check for desktop updates** brings you current. You
+can also install the latest Desktop build over your existing app — the fixed
+local origin keeps your library — from the
+[desktop-v1.1.12 release](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.12/DinosourWeb-Setup-1.1.12.exe),
+or in general from the newest `desktop-vX.Y.Z` tag on the
+[releases page](https://github.com/lexerprivate-sudo/dinosour-web/releases).
+
 The installer is unsigned. Windows may display an unknown-publisher warning.
 The download is approximately 145 MB. Source and third-party notices are included
 in the release/tag; see `desktop/THIRD_PARTY_NOTICES.md`.
@@ -198,9 +206,13 @@ invite link (refresh the in-app Share screen to show it).
 - English captions: English creator or automatic tracks in the **Captions** menu,
   with manual tracks offered before auto-generated ones. Your Off/track preference
   is remembered on this device; unavailable tracks are disabled.
-- The watch page’s loading screen shows a progress ring whose percentage tracks the
-  media buffered ahead of the play position, ramping toward a ~8 s read-ahead
-  target (an indeterminate sweep while awaiting the first bytes), not by elapsed time.
+- The watch page’s loading screen shows the video’s poster with a slow
+  ken-burns pan while a progress ring sweeps toward readiness; the ring’s
+  percentage tracks the media buffered ahead of the play position, ramping
+  toward a ~8 s read-ahead target (an indeterminate sweep while awaiting the
+  first bytes), not by elapsed time. The overlay fades out on the first
+  frame; if the network fails, the error screen appears right away with a
+  Retry button.
 - One **Library** page for Watch later, liked videos, and your own collections:
   create named collections, rename or delete them any time, play a whole
   collection with **Play all** (it queues the collection and starts the first
@@ -357,11 +369,10 @@ implementation of its native transport.
   Client metadata expires after two minutes and is limited to 20 entries.
 - Speculative loading is skipped on Data Saver/2G connections, cancelled when
   leaving the page, and the warmed player expires after three minutes.
-- While playback starts, the thumbnail and a loading message replace the blank
-  player; the message carries a progress ring whose percentage tracks the media
-  the browser reports as buffered ahead of the play position, ramping toward a
-  ~8 s read-ahead target (an indeterminate sweep while awaiting the first
-  bytes). Later buffering uses a small indicator over the last video frame.
+- While playback starts, the poster (slowly panning ken-burns style) and a
+  loading message replace the blank player, with the same buffered-ahead
+  progress ring; the overlay fades out on the first frame. Later
+  buffering uses a small indicator over the last video frame.
 - Saved-position playback works with warmed players; playback controls wrap on
   narrow phone screens.
 

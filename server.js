@@ -416,7 +416,7 @@ async function getVideo(id) {
       audioFallbacks: audioFormats.slice(1, 3).map(f => ticket(f, f.http_headers || info.http_headers)),
       audioTracks, captions,
     };
-  });
+  }, { stale: 30 * 60 * 1000 });
 }
 
 function json(res, status, data) {
@@ -640,7 +640,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/video-lite') {
       const id = url.searchParams.get('id');
       if (!validId(id)) return json(res, 400, { error: 'Invalid YouTube video ID.' });
-      const info = await cached(`video-lite:${id}`, 10 * 60 * 1000, () => liteDetails(id), { stale: 30 * 60 * 1000 });
+      const info = await cached(`video-lite:${id}`, 10 * 60 * 1000, async () => {
+        // liteDetails returns null on any failure; caching that null would
+        // pin a transient 404 for up to 40 minutes. Throw instead so the
+        // failure evicts immediately and stale warm entries survive.
+        const details = await liteDetails(id);
+        if (!details) throw new Error('unavailable');
+        return details;
+      }, { stale: 30 * 60 * 1000 }).catch(() => null);
       if (!info) return json(res, 404, { error: 'This video is unavailable right now.' });
       return json(res, 200, info);
     }
@@ -684,6 +691,7 @@ const server = http.createServer(async (req, res) => {
       '/playback-core.js': ['playback-core.js', 'text/javascript; charset=utf-8', 'no-cache'],
   '/downloads.js': ['downloads.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/native.js': ['native.js', 'text/javascript; charset=utf-8', 'no-cache'],
+      '/native-api.js': ['native-api.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/startup.js': ['startup.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/style.css': ['style.css', 'text/css; charset=utf-8', 'no-cache'],
       '/icon.svg': ['icon.svg', 'image/svg+xml', 'public, max-age=86400'],

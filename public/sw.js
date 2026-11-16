@@ -1,7 +1,7 @@
 // Dinosour service worker: network-first so a deployed update is picked up as
 // soon as the device is online, with a cached shell as the offline fallback.
 // API, media ranges and cross-origin requests always go straight to the network.
-const CACHE = 'dinosour-shell-v27';
+const CACHE = 'dinosour-shell-v29';
 const SHELL = ['/', '/startup.js', '/native.js', '/native-api.js', '/app.js', '/playback-core.js', '/reel.js', '/watch.js', '/downloads.js', '/style.css', '/manifest.webmanifest', '/icon.svg',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/icons/icon-maskable-192.png', '/icons/apple-touch-icon.png', '/icons/favicon-32.png'];
 

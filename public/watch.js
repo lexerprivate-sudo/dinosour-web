@@ -75,11 +75,15 @@ export async function watch(id, current, controller, refresh) {
     const fraction = Math.max(0, Math.min(1, buffered / target)); // ready against ~first 8 s of playback
     const indeterminate = fraction === 0; // no meaningful buffered data yet (metadata / first-byte phase)
     const circumference = 2 * Math.PI * 34;
-    // In indeterminate mode draw a partial arc so the rotating sweep is visible.
-    fill.style.strokeDashoffset = String(circumference * (indeterminate ? 0.75 : 1 - fraction));
+    // In indeterminate mode draw a ~35% arc so the rotating sweep reads as a
+    // healthy "working" signal instead of a static empty ring. The CSS agent
+    // owns .watch-progress--zero (light pulse keyframe); .indeterminate stays
+    // as the fallback so the ring keeps sweeping even without that CSS.
+    fill.style.strokeDashoffset = String(circumference * (indeterminate ? 0.65 : 1 - fraction));
     if (pct) pct.textContent = String(Math.round(fraction * 100) + '%');
     if (ring) {
       ring.classList.toggle('indeterminate', indeterminate);
+      ring.classList.toggle('watch-progress--zero', indeterminate);
       ring.setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
     }
   };
@@ -101,7 +105,7 @@ export async function watch(id, current, controller, refresh) {
   };
   const clearStatus = () => { status.innerHTML = ''; status.hidden = true; };
   const showStatus = html => { status.innerHTML = html; status.hidden = false; };
-  let disposed = false, syncTimer, lastSave = 0, separate = false, info, audioFallbacks = [], audioIndex = 0, healthySince = 0, retrying = false;
+  let disposed = false, syncTimer, lastSave = 0, separate = false, info, audioFallbacks = [], audioIndex = 0, healthySince = 0, retrying = false, errorShown = false;
   // Background listening: when the app goes away, hold only the audio track.
   // The video decoder would idle-burn battery and risk background killers,
   // while audio alone is exactly what a "music" session needs.
@@ -168,6 +172,16 @@ export async function watch(id, current, controller, refresh) {
   });
   const showError = message => {
     if (disposed) return;
+    // First-write-wins: the underlying cause shown earlier (e.g. a server-side
+    // reason) must not be replaced by the generic watchdog text.
+    if (errorShown) {
+      loading.hidden = true; bufferHint.hidden = true;
+      clearTimeout(waitingTimer); clearTimeout(stallTimer); setPlaybackBusy(false);
+      video.pause(); audio.pause();
+      return;
+    }
+    errorShown = true;
+    clearInterval(bufferTimer);
     loading.hidden = true; bufferHint.hidden = true; clearTimeout(waitingTimer);
     clearTimeout(stallTimer); setPlaybackBusy(false);
     video.pause(); audio.pause();
