@@ -1267,7 +1267,9 @@ async function watch(id, current, controller, refresh) {
         : await shortInfo(id, controller.signal, refresh);
     metadataMs = performance.now() - watchStarted;
     if (current !== generation) return;
-    remember(info);
+    // Defense in depth: only English caption tracks ever reach the UI,
+    // even if an older bundled server hands us the unfiltered list.
+    if (Array.isArray(info.captions)) info.captions = info.captions.filter(t => /^en([-_][a-z0-9-]*)?$/i.test(String(t?.language || '')));
     video.poster = info.thumb || video.poster;
     document.title = `${info.title} — Dinosour`;
     const restartKey = `dinosour.restart.${id}`;
@@ -1519,6 +1521,7 @@ async function watch(id, current, controller, refresh) {
     reloadStreams = (fresh, position, autoplay) => {
       const height = info.qualities[selectedQuality].height;
       info = fresh; audioTrack = preferredAudio(info);
+      if (Array.isArray(info.captions)) info.captions = info.captions.filter(t => /^en([-_][a-z0-9-]*)?$/i.test(String(t?.language || '')));
       const index = info.qualities.findIndex(q => q.height === height);
       $('#quality').innerHTML = '<option value="auto">Auto</option>' + qualityOptions(info);
       $('#quality').value = autoMode ? 'auto' : String(index >= 0 ? index : startQuality(info));

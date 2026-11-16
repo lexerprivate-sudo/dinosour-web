@@ -723,3 +723,9 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 .library-bytes { font-size: 13px; color: var(--muted); margin: 0; }
 .download-quality-list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; margin-top: 12px; }
 .download-quality-list .save-row[aria-pressed="true"] { background: rgba(62, 166, 255, .12); }
+
+/* Watch page: force native <video> controls permanently visible (YouTube Desktop fullscreen style). Chrome/Safari only; reel keeps native controls hidden. */
+.watch-page video::-webkit-media-controls-panel,
+.watch-page video::-webkit-media-controls-enclosure,
+.watch-page video::-webkit-media-controls-timeline,
+.watch-page video::-webkit-media-controls-play-button { display: flex !important; visibility: visible !important; opacity: 1 !important; }
