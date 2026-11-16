@@ -1270,6 +1270,7 @@ async function watch(id, current, controller, refresh) {
     // Defense in depth: only English caption tracks ever reach the UI,
     // even if an older bundled server hands us the unfiltered list.
     if (Array.isArray(info.captions)) info.captions = info.captions.filter(t => /^en([-_][a-z0-9-]*)?$/i.test(String(t?.language || '')));
+    remember(info);
     video.poster = info.thumb || video.poster;
     document.title = `${info.title} — Dinosour`;
     const restartKey = `dinosour.restart.${id}`;
