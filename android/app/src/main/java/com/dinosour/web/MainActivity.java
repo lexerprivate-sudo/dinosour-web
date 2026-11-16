@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
     private LinearLayout startupView;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean startupReady, rendererGone;
+    private boolean notificationPromptRequested;
     private boolean backgroundPlaying, backgroundServiceRunning;
     private final Runnable startupTimeout = () -> {
         if (!startupReady && !loadFailed && !isFinishing() && !isDestroyed())
@@ -88,16 +89,6 @@ public class MainActivity extends Activity {
         String previousServer = prefs.getString(KEY_SERVER, null);
         serverUrl = Config.APP_ORIGIN;
         setupWindow();
-        // Android 13+ requires a runtime grant before ANY app notification
-        // appears; without this ask, the background-audio notification and its
-        // lock-screen controls never render. Declines are respected (the app
-        // stays silent, which is a valid choice).
-        if (Build.VERSION.SDK_INT >= 33 &&
-                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                        android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
-                    REQUEST_NOTIFICATIONS);
-        }
         buildLayout();
         engine = new NativeEngine(this, (id, payload) -> runOnUiThread(() -> {
             if (!isFinishing() && !isDestroyed() && webView != null)
@@ -180,6 +171,10 @@ public class MainActivity extends Activity {
         startupText.setPadding(0, dp(12), 0, dp(24));
         startupView.addView(startupText);
         startupView.addView(new ProgressBar(this));
+        // The overlay is an opaque spinner with no other escape; tapping it
+        // reloads the page if the interface stalls.
+        startupView.setContentDescription("Reload");
+        startupView.setOnClickListener(v -> { if (webView != null) webView.reload(); });
         root.addView(startupView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         buildErrorView();
         setContentView(root);
@@ -279,6 +274,23 @@ public class MainActivity extends Activity {
         hideError();
         progress.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
+        requestNotificationsIfReady();
+    }
+
+    // Android 13+ requires a runtime grant before ANY app notification
+    // appears; without this ask, the background-audio notification and its
+    // lock-screen controls never render. Declines are respected (the app
+    // stays silent, which is a valid choice). Deferred until the interface is
+    // ready so the prompt does not delay cold start; fires at most once.
+    private void requestNotificationsIfReady() {
+        if (notificationPromptRequested) return;
+        notificationPromptRequested = true;
+        if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_NOTIFICATIONS);
+        }
     }
 
     private void showError(String detail) {
@@ -353,7 +365,9 @@ public class MainActivity extends Activity {
     // loadDataWithBaseURL restores the old origin without contacting the old
     // computer/tunnel. Read only our two keys; keep the original storage intact.
     private void migrateStorage(String previousServer) {
-        if (prefs.getBoolean("standalone_migrated", false) || previousServer == null ||
+        // Fresh installs lack the legacy key entirely; skip the second
+        // WebView (and its 2500ms grace delay) and continue immediately.
+        if (!prefs.contains(KEY_SERVER) || prefs.getBoolean("standalone_migrated", false) || previousServer == null ||
                 Config.APP_ORIGIN.equals(previousServer)) {
             loadServer();
             return;

@@ -104,6 +104,8 @@ async function start() {
   ]));
   window.once('ready-to-show', () => window.show());
   await window.loadURL(origin + '/#home');
+  // If the last run spawned the installer, acknowledge the completed update once.
+  checkPendingInstallMarker();
   // Look for a newer desktop release shortly after startup; failures are
   // silent except for the log so a flaky network never disturbs the user.
   setTimeout(() => checkForUpdates(true).catch(error => updateLog(`update check failed: ${error.message}`)), 10000);
@@ -162,6 +164,43 @@ const update = {
 function updateLog(message) {
   try { fs.appendFile(path.join(app.getPath('userData'), 'desktop.log'), `[updater] ${message}\n`); }
   catch { /* logging must never break playback */ }
+}
+
+function pendingInstallMarkerPath() {
+  return path.join(app.getPath('userData'), 'updates', 'pending-install.json');
+}
+
+function writePendingInstallMarker(version) {
+  try {
+    const directory = path.join(app.getPath('userData'), 'updates');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(pendingInstallMarkerPath(), JSON.stringify({ writtenAt: new Date().toISOString(), expectedVersion: version }));
+    updateLog(`wrote pending-install marker for ${version}`);
+  } catch (error) {
+    updateLog(`could not write pending-install marker: ${error.message}`);
+  }
+}
+
+function checkPendingInstallMarker() {
+  try {
+    const marker = pendingInstallMarkerPath();
+    if (!fs.existsSync(marker)) return;
+    let parsed = null;
+    try { parsed = JSON.parse(fs.readFileSync(marker, 'utf8')); } catch { /* fall through: treat as stale */ }
+    fs.unlinkSync(marker);
+    const writtenAt = parsed?.writtenAt ? Date.parse(parsed.writtenAt) : NaN;
+    const age = Date.now() - writtenAt;
+    if (!Number.isFinite(age) || age > 24 * 60 * 60 * 1000 || age < 0) return; // stale or malformed: deleted silently
+    const version = parsed.expectedVersion || app.getVersion();
+    if (tray) {
+      tray.displayBalloon?.({ iconType: 'info', title: 'Dinosour updated', content: `Dinosour updated to ${version}` });
+      updateLog(`update to ${version} completed; notified via tray balloon`);
+    } else {
+      updateLog(`update to ${version} completed; tray not present, no balloon shown`);
+    }
+  } catch (error) {
+    updateLog(`pending-install marker check failed: ${error.message}`);
+  }
 }
 
 function notifyUpdateError(error) {
@@ -296,9 +335,11 @@ app.on('before-quit', event => {
     updateSpawned = true;
     try {
       updateLog(`launching installer for ${update.pending.version}`);
+      writePendingInstallMarker(update.pending.version);
       spawn(update.pending.installer, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } catch (error) {
       updateLog(`installer launch failed: ${error.message}`);
+      try { fs.unlinkSync(pendingInstallMarkerPath()); } catch { /* marker removal is best-effort */ }
     }
     // Give the silent installer a moment, then finish quitting so it can
     // replace the files of the process that is about to exit.
@@ -306,6 +347,10 @@ app.on('before-quit', event => {
     setTimeout(() => app.quit(), 2000);
     return;
   }
+  // Final pass (also the second before-quit after an installer spawn): drop the
+  // tray so a stale icon is not left behind when the exe is replaced.
+  try { tray?.destroy(); } catch { /* tray may already be gone */ }
+  tray = null;
   if (backend?.pid && backend.exitCode === null) {
     // Also stop yt-dlp/JS-runtime children; no background service stays running.
     spawnSync('taskkill', ['/pid', String(backend.pid), '/t', '/f'], { windowsHide: true, timeout: 10000 });

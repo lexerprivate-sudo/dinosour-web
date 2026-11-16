@@ -31,6 +31,8 @@ function savePreferences() {
 }
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) themeColor.setAttribute('content', theme === 'light' ? '#ffffff' : '#0f0f0f');
   const label = `Switch to ${theme === 'light' ? 'dark' : 'light'} theme`;
   $('#theme-toggle').innerHTML = icon(theme === 'light' ? 'moon' : 'sun');
   $('#theme-toggle').setAttribute('aria-label', label);
@@ -813,6 +815,14 @@ function sanitizeLibrary(source) {
     .slice(0, 50);
   return clean;
 }
+// Seconds of media buffered ahead of the current playback position, or 0 when
+// the position is not inside a buffered range. Shared by watch and reel.
+function bufferedAhead(media) {
+  for (let i = 0; i < media.buffered.length; i++) {
+    if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) >= media.currentTime) return media.buffered.end(i) - media.currentTime;
+  }
+  return 0;
+}
 function sanitizeBackup(data) {
   if (!data || data.app !== 'dinosour' || !data.library || typeof data.library !== 'object') throw new Error('This is not a Dinosour backup file.');
   const clean = sanitizeLibrary(data.library);
@@ -1468,15 +1478,9 @@ async function watch(id, current, controller, refresh) {
       if (healthySince && Date.now() - healthySince > 10000) autoRetryCount.delete(id);
       if (Date.now() - lastSave > 5000) { saveProgress(); lastSave = Date.now(); }
     };
-    const ahead = media => {
-      for (let i = 0; i < media.buffered.length; i++) {
-        if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) >= media.currentTime) return media.buffered.end(i) - media.currentTime;
-      }
-      return 0;
-    };
     syncTimer = setInterval(() => {
       syncAudio();
-      playbackBufferAhead = Math.min(ahead(video), separate ? ahead(audio) : Infinity);
+      playbackBufferAhead = Math.min(bufferedAhead(video), separate ? bufferedAhead(audio) : Infinity);
       if (playbackBufferAhead < 3) { /* hold warm buffer; it recovers */ }
       // Once this video reaches a healthy buffer, hold a warm pair ready for
       // the next queue/related video. prepareWatch dedupes, so a shifted queue re-warms.
@@ -1566,9 +1570,9 @@ const shortInfo = (id, signal, refresh) => {
 // starts playing as soon as it becomes active.
 async function reel(id, current, controller) {
   main.className = 'shorts-reel-page';
-  main.innerHTML = `<div class="reel" id="reel"><div class="reel-main"><div class="reel-stage" id="reel-stage"><div class="reel-top"><a class="reel-back reel-top-button" href="#shorts" aria-label="Back to Shorts" title="Back to Shorts">${icon('back')}</a><button id="reel-play" class="reel-top-button" type="button" aria-label="Pause" title="Pause">${icon('pause')}</button><button id="reel-mute" class="reel-top-button" type="button" aria-label="Mute" title="Mute">${icon('volume')}</button><button id="reel-fullscreen" class="reel-top-button reel-fullscreen" type="button" aria-label="Full screen" title="Full screen">${icon('fullscreen')}</button></div><div class="reel-screen"><div class="reel-player active" data-reel-player><video id="video" playsinline preload="auto"></video><audio id="audio" preload="auto"></audio></div><div class="reel-player" data-reel-player aria-hidden="true"><video playsinline preload="auto"></video><audio preload="auto"></audio></div><div id="player-status" class="player-status" hidden></div><div id="reel-loading" class="reel-loading" hidden aria-hidden="true"><span class="spinner"></span></div><div class="reel-info" id="reel-info"></div><div id="reel-progress" class="reel-progress" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><span id="reel-progress-fill"></span></div></div></div><div class="reel-side"><div class="reel-actions" id="reel-actions"></div></div><div class="reel-nav"><button id="reel-prev" type="button" aria-label="Previous Short" title="Previous Short">${icon('up')}</button><button id="reel-next" type="button" aria-label="Next Short" title="Next Short">${icon('down')}</button></div></div></div>`;
+  main.innerHTML = `<div class="reel" id="reel"><div class="reel-main"><div class="reel-stage" id="reel-stage"><div class="reel-top"><a class="reel-back reel-top-button" href="#shorts" aria-label="Back to Shorts" title="Back to Shorts">${icon('back')}</a><button id="reel-play" class="reel-top-button" type="button" aria-label="Pause" title="Pause">${icon('pause')}</button><button id="reel-mute" class="reel-top-button" type="button" aria-label="Mute" title="Mute">${icon('volume')}</button><button id="reel-fullscreen" class="reel-top-button reel-fullscreen" type="button" aria-label="Full screen" title="Full screen">${icon('fullscreen')}</button></div><div class="reel-screen"><div class="reel-player active" data-reel-player><video id="video" playsinline preload="auto"></video><audio id="audio" preload="auto"></audio></div><div class="reel-player" data-reel-player aria-hidden="true"><video playsinline preload="auto"></video><audio preload="auto"></audio></div><div id="player-status" class="player-status" hidden></div><div id="reel-loading" class="reel-loading" hidden aria-hidden="true"><span class="spinner"></span></div><div class="reel-info" id="reel-info"></div><div id="reel-progress" class="reel-progress" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><span id="reel-progress-fill"></span></div><div id="reel-grow" class="reel-grow" role="status" hidden></div></div></div><div class="reel-side"><div class="reel-actions" id="reel-actions"></div></div><div class="reel-nav"><button id="reel-prev" type="button" aria-label="Previous Short" title="Previous Short">${icon('up')}</button><button id="reel-next" type="button" aria-label="Next Short" title="Next Short">${icon('down')}</button></div></div></div>`;
   const reel = $('#reel'), stage = $('#reel-stage'), status = $('#player-status');
-  const progress = $('#reel-progress'), progressFill = $('#reel-progress-fill'), loading = $('#reel-loading');
+  const progress = $('#reel-progress'), progressFill = $('#reel-progress-fill'), loading = $('#reel-loading'), growHint = $('#reel-grow');
   // Two complete player pairs share the stage. The idle pair buffers the next
   // Short, then becomes the live pair on the next swipe. Because the element
   // itself is promoted, its already-buffered frames and audio are kept.
@@ -1593,13 +1597,6 @@ async function reel(id, current, controller) {
   let info = null, separate = false, disposed = false, syncTimer, lastSave = 0, loadToken = 0, loadHint;
   let audioFallbacks = [], audioIndex = 0, autoRetries = 0, healthySince = 0, growing = false, navLock = 0, wheelAt = 0, recovering = false;
   let prefetched = null, prefetchRequest = 0, prefetching = null;
-  const bufferedAhead = media => {
-    for (let i = 0; i < media.buffered.length; i++) {
-      if (media.buffered.start(i) <= media.currentTime && media.buffered.end(i) >= media.currentTime)
-        return media.buffered.end(i) - media.currentTime;
-    }
-    return 0;
-  };
   const idlePlayer = () => players[activePlayer === 0 ? 1 : 0];
   const clearPlayer = pair => {
     pair.video.pause(); pair.audio.pause();
@@ -1684,6 +1681,7 @@ async function reel(id, current, controller) {
   cleanup = () => {
     saveProgress(); disposed = true; clearInterval(syncTimer); clearLoadHint();
     prefetchRequest++; prefetched = null;
+    playbackBusy = false; playbackBufferAhead = Infinity;
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     if (document.fullscreenElement === reel) document.exitFullscreen?.().catch(() => {});
     for (const pair of players) clearPlayer(pair);
@@ -1764,18 +1762,31 @@ async function reel(id, current, controller) {
     if (prev) prev.hidden = index <= 0;
     if (next) next.disabled = index + 1 >= list.length && !shortsSession.cursor;
   };
+  const hideGrowHint = () => { growHint.hidden = true; growHint.removeAttribute('aria-busy'); growHint.innerHTML = ''; };
+  const showGrowSpinner = () => { growHint.hidden = false; growHint.setAttribute('aria-busy', 'true'); growHint.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="sr-only">Loading more Shorts…</span>'; };
+  const showGrowEnd = () => { growHint.hidden = false; growHint.removeAttribute('aria-busy'); growHint.textContent = 'End of results'; };
+  // Once a continuation request fails or yields nothing new, stop asking for
+  // more pages on every swipe; the end-of-feed row stays up for this reel.
+  let growFailed = false;
   const grow = async () => {
-    if (!shortsSession.cursor || growing || disposed) return;
+    if (!shortsSession.cursor || growing || disposed || growFailed) return;
     growing = true;
+    showGrowSpinner();
     try {
       const params = new URLSearchParams({ continuation: shortsSession.cursor });
       if (shortsSession.query) { params.set('q', shortsSession.query); params.set('shorts', '1'); }
       const data = await api(`${shortsSession.query ? '/api/search' : '/api/shorts'}?${params}`, controller.signal);
       if (disposed || current !== generation) return;
+      const before = list.length;
       for (const v of data.videos) if (!list.some(item => item.id === v.id)) list.push(v);
       shortsSession.cursor = data.continuation || '';
-    } catch {}
-    growing = false;
+      if (list.length === before) { growFailed = true; showGrowEnd(); } else hideGrowHint();
+    } catch (error) {
+      const stillHere = !disposed && current === generation;
+      if (stillHere && error?.name !== 'AbortError') { growFailed = true; showGrowEnd(); } else if (stillHere) hideGrowHint();
+    } finally {
+      growing = false;
+    }
   };
   const load = async (nextIndex, { direction = 0, position = 0, refresh = false } = {}) => {
     if (disposed) return;

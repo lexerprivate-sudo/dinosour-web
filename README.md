@@ -185,6 +185,8 @@ invite link (refresh the in-app Share screen to show it).
   so it never stacks on the browser’s own buffering feedback.
 - Paste a YouTube URL, Shorts URL, or video ID directly into search. Shorts links
   open in the vertical reel.
+- Shorts cards deep-link straight into the reel: `#short=<id>` opens the reel at
+  that Short, and the address bar follows as you swipe.
 - Click a video or Short and it starts playing automatically. No extra “Play video”
   step.
 - Direct H.264 video and AAC audio playback, with available qualities up to 1080p
@@ -193,10 +195,19 @@ invite link (refresh the in-app Share screen to show it).
 - Native playback controls, seeking, volume, fullscreen, and 0.5–2× speed on the
   watch page, plus an explicit volume slider and mute button in the Playback row.
   The slider controls the separate audio track too and is remembered on your device.
+- English captions: English creator or automatic tracks in the **Captions** menu,
+  with manual tracks offered before auto-generated ones. Your Off/track preference
+  is remembered on this device; unavailable tracks are disabled.
+- The watch page’s loading screen shows a progress ring whose percentage is driven
+  by the media buffered ahead of the play position (capped at 45 s), not by
+  elapsed time.
 - One **Library** page for Watch later, liked videos, and your own collections:
-  gather videos you love into named collections, rename or delete them any time,
-  and play a whole collection in one tap. Collections live in the same local
-  storage as everything else.
+  create named collections, rename or delete them any time, play a whole
+  collection with **Play all** (it queues the collection and starts the first
+  video), and see a mosaic cover built from the collection’s thumbnails. A
+  **Save to…** picker on video cards and the watch page files a video into
+  Watch later or a collection. Collections live in the same local storage as
+  everything else.
 - Watch later, liked videos, and watch history with resume positions.
 - **Continue watching** on Home: unfinished videos appear in a horizontal rail
   with a progress bar, **Resume**, **Start over**, per-item **x**, and **Clear**.
