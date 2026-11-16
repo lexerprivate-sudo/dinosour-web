@@ -40,7 +40,7 @@ export async function watch(id, current, controller, refresh) {
   const loading = document.createElement('div');
   loading.className = 'watch-loading';
   loading.setAttribute('role', 'status');
-  loading.innerHTML = `<img src="${escape(video.poster)}" alt=""><div class="watch-loading-caption"><svg class="watch-progress" viewBox="0 0 80 80" role="progressbar" aria-label="Buffering" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><circle class="watch-progress-track" cx="40" cy="40" r="34"/><circle class="watch-progress-fill" cx="40" cy="40" r="34"/><text class="watch-progress-pct" x="40" y="40" text-anchor="middle">0</text></svg><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
+  loading.innerHTML = `<img src="${escape(video.poster)}" alt="" onerror="this.style.display='none'"><div class="watch-loading-caption"><svg class="watch-progress" viewBox="0 0 80 80" role="progressbar" aria-label="Buffering" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><circle class="watch-progress-track" cx="40" cy="40" r="34"/><circle class="watch-progress-fill" cx="40" cy="40" r="34"/><text class="watch-progress-pct" x="40" y="40" text-anchor="middle">0</text></svg><strong>Getting your video ready…</strong><span>${escape(preview?.title || 'Preparing playback')}</span></div>`;
   video.parentElement.append(loading);
   const bufferHint = document.createElement('div');
   bufferHint.className = 'watch-buffer-hint'; bufferHint.hidden = true;

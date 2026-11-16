@@ -591,7 +591,8 @@ const server = http.createServer(async (req, res) => {
       if (!validId(id)) return json(res, 400, { error: 'Invalid thumbnail ID.' });
       const short = url.searchParams.get('t') === 'short';
       const image = await cached(`thumb:${short ? 'short:' : ''}${id}`, 30 * 60 * 1000, async () => {
-        for (const name of short ? ['oar2', 'frame0', 'hqdefault'] : ['hqdefault']) {
+        for (const name of short ? ['oar2', 'frame0', 'hqdefault', 'sddefault', 'mqdefault', '0.jpg', 'default.jpg']
+                                 : ['maxresdefault', 'sddefault', 'hqdefault', 'mqdefault', '0.jpg', 'default.jpg']) {
           const upstream = await fetch(`https://i.ytimg.com/vi/${id}/${name}.jpg`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
           if (upstream?.ok) return Buffer.from(await upstream.arrayBuffer());
         }
