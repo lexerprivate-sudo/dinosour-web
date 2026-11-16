@@ -19,13 +19,23 @@ This document is the map a new contributor needs before touching any of it.
 - `audio-formats.js` — `selectAudioFormats`, `audioTrackGroups` — shared by Node
   and the Android WebView (assets include it as `native/audio-formats.js`). Media URLs
   carry an opaque 24-byte ticket issued by `server.js` (see "Request lifecycle").
-- `public/app.js` — the single-page client. No build step; plain ES modules inline.
+- `public/app.js` — the single-page client and its router. No build step; plain ES
+  modules. The entry bundle imports `public/playback-core.js` (shared playback
+  kernel: DOM helpers, the stale-while-revalidate `shortInfo` metadata cache)
+  statically and lazy-imports `public/reel.js` (the Shorts reel) on the first
+  `#short=` visit. `public/startup.js` is a classic script: the parse-time theme
+  bootstrap must stay ES5-compatible, and it paints a no-network fallback card
+  when the main app never signals readiness. `public/native.js` /
+  `public/native-api.js` shim the Android bridge.
+- `public/downloads.js` — the offline download engine behind one `LocalDownloads`
+  API (see "Offline downloads"). Independent of `app.js`; loaded by it.
 - `desktop/main.cjs` — Electron main. Forks `server.js` as a child (`ELECTRON_RUN_AS_NODE=1`)
   on fixed ports 43219/43220. The tray icon is created lazily on a window close with
   media playing; the GitHub-releases-based updater lives in the same file.
 - `android/` — APK builder. Copies `public/` into APK assets via `bundleWebAssets`
   (`android/app/build.gradle`). The APK declares INTERNET and related permissions;
-  YouTube traffic goes through `NativeEngine.java` (youtubedl-android).
+  YouTube traffic goes through `NativeEngine.java` (youtubedl-android); offline
+  downloads are native yt-dlp transfers in the same engine.
 
 ## Request lifecycle (playback)
 
@@ -60,28 +70,64 @@ playback: while the active video is starved (playing, not yet fully ready, under
 of competing with the current stream for CDN connections, and resumes once the
 buffer recovers or playback pauses.
 
+## Offline downloads
+
+The watch page has a Download button (`#download-toggle` / `data-download-toggle`)
+that opens a quality picker dialog with per-quality sizes. Video and audio are
+always stored as separate files and played back together — the same split as
+streamed playback. Two engines sit behind one API, `LocalDownloads` in
+`public/downloads.js`:
+
+- **Browser / desktop:** files live in the Origin Private File System under a
+  `downloads/` directory as `<id>.video` / `<id>.audio`. Progress lives in a
+  module-level map; a metadata mirror in `localStorage` (`dinosour.downloads.v1`)
+  lets a reload report interrupted or completed downloads. Object URLs are
+  disk-backed, so large files never enter memory.
+- **Android (standalone app):** every `LocalDownloads` method is a passthrough to
+  `window.__dinosourNativeCall('download' | 'download-stat' | 'download-cancel' |
+  'download-delete', …)`. `NativeEngine.java` runs one yt-dlp transfer per track
+  (video first, then audio) on a single-thread download pool with an eight-slot
+  queue, writing to `noBackupFilesDir/downloads`. The files are served to the
+  WebView at `/dl/<id>/video` and `/dl/<id>/audio` with byte-range support
+  (`shouldInterceptRequest` in `MainActivity.java`, GET/HEAD only).
+
+Download metadata lives in the library store (`dinosour.library.v1`, under
+`.downloads`), is device-local, and is excluded from JSON backups. The Library
+page shows a **Downloads** rail with the total bytes stored and a per-item
+delete; the rail disappears when empty. Playback of a downloaded video uses local
+media (`blob:` object URLs in the browser, `/dl/…` paths in the APK); if the
+local copy is missing the app falls back to streamed playback. `npm run
+test:downloads` covers the browser/OPFS path with local FFmpeg fixtures
+(picker, sizes, offline playback, rail, delete, corrupt-entry sanitize). The
+Android download path has no automated coverage; verify it on-device.
+
 ## Routing & focus
 
 `route()` is the only route entry point (hash change / clicks / `route(true)`). It
 aborts the previous generation and focuses `#main` (keyboard/AT users land on the
 landmark). `#search` always mirrors the hash via `updateSearch()`. `el.search` is debounced 180 ms.
+The sidebar's primary entries are Home, Shorts, History and Library (`#home`,
+`#shorts`, `#history`, `#library`); Watch later and liked videos are sections
+inside Library, not separate entries.
 
 ## Caches (all of them)
 
 | Name | Where | TTL (fresh / stale) | Scope |
 |---|---|---|---|
 | `cached()` | `server.js` | varies per route (5/2/10/30 min) | server responses |
-| `infoCache` | client `app.js` | 2 min / — | `/api/video` responses (the whole page needs) |
-| `shortInfo` in-flight dedupe | client `app.js` | — | shared promise per video id |
+| `shortInfo` (`resolved` / `inflight`) | client `playback-core.js` | 2 min / 6 h stale (SWR) | `/api/video` responses; shared in-flight promise per id; cap 20; background revalidate |
 | `shortMetaCache` | `youtube-search.js` | 30 min (Shorts grid) / 10 min (video-lite) / — | Shorts grid titles, channels, views; `/api/video-lite` header; FIFO at 400 |
 | boot cache | client `app.js` | none (last first page) | feed tiles for instant paint |
 | `dinosour.restart.*`, `dinosour.feed.v1:*` | client `app.js` | session / by hand | resume position / boot tiles |
+| `dinosour.library.v1` | client `app.js` | none (device-local) | the library store, incl. `.downloads` download metadata (excluded from JSON backups) |
+| `dinosour.downloads.v1` | client `downloads.js` | none (until delete) | OPFS download progress mirror |
 | tickets (`tickets`, `captionTickets`) | `server.js` | FIFO eviction (stream 6h / caption 1h) | signed URLs |
 | service worker shell (`dinosour-shell-vN`) | `public/sw.js` | network-first | PWA offline shell |
 
-Rules of thumb: stale entries are safe only when re-validated on use; `/api/video`
-deliberately has no stale window because its tickets expire; client LRU eviction is
-insertion order.
+Rules of thumb: stale entries are safe only when re-validated on use — `shortInfo`
+serves a stale entry immediately and revalidates in the background (a failed
+refresh keeps the stale entry; an entry older than the stale window blocks on a
+fresh fetch); client LRU eviction is insertion order with touch-on-access.
 
 ## Background audio (music mode)
 
@@ -110,10 +156,12 @@ paid content restrictions, no DRM work, no age-gate dodging.
 ## Build, test & release
 
 - `npm run` lists every task. The default dev flow is `npm start`.
-- `npm run test:*` runs one suite. Browser suites (`test:browser`,
-  `test:watch-prefetch`, `test:features`, `test:playback-features`) need system Chrome
-  and either FFmpeg or no live network access for the local media path; live tests
-  need network. `test:pwa` re-reads the shell cache name from `sw.js`.
+- `npm run test:*` runs one suite. Browser suites need the system Chrome (not
+  bundled); most expect the development server on `127.0.0.1:3210` (start
+  `node server.js` separately — some suites honor `TEST_URL` instead). `test:pwa`
+  re-reads the shell cache name from `sw.js`. `docs/TESTING.md` lists every
+  suite with its prerequisites (Chrome, FFmpeg, live network, Python, Android
+  build, packaged desktop build).
 - CI: pushing to `main` runs `npm run check` + `npm test` on a throwaway server
   at `:3210` (see `.github/workflows/ci.yml`). Browser suites are excluded
   because Chrome and YouTube are not reliably available to the sandbox runner.

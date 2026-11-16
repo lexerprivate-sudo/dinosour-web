@@ -72,6 +72,14 @@ public class MainActivity extends Activity {
     private String pendingBackup;
     private static final int OPEN_BACKUP = 501, SAVE_BACKUP = 502, REQUEST_NOTIFICATIONS = 503;
     private static final String[] STORAGE_KEYS = {"dinosour.library.v1", "dinosour.ui.v1"};
+    // The page can be buggy or compromised; never let multi-megabyte strings
+    // reach native code. 32 MB still fits a legitimate multi-MB library backup.
+    private static final int MAX_STORED_DATA = 32 * 1024 * 1024;
+    // NativeEngine expects ids like "1700000000000-1" (<= 22 chars).
+    private static final int MAX_REQUEST_ID = 64;
+    private static final int MAX_REQUEST_KIND = 32;
+    // Matches NativeEngine.request's own 100,000-char ceiling.
+    private static final int MAX_REQUEST_PAYLOAD = 100_000;
     private LinearLayout startupView;
     private final android.os.Handler startupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean startupReady, rendererGone;
@@ -710,7 +718,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void exportBackup(String data) {
             if (!isAppOrigin()) return;
-            if (data.length() > 2 * 1024 * 1024) return;
+            if (data == null || data.length() > MAX_STORED_DATA) return;
             runOnUiThread(() -> {
                 pendingBackup = data;
                 Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -724,12 +732,19 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void nativeRequest(String id, String kind, String payload) {
             if (!isAppOrigin()) return;
+            if (id == null || kind == null || payload == null ||
+                    id.length() > MAX_REQUEST_ID || kind.length() > MAX_REQUEST_KIND ||
+                    payload.length() > MAX_REQUEST_PAYLOAD) {
+                replyNativeError(id, "The request is too large or invalid.");
+                return;
+            }
             if (engine != null) engine.request(id, kind, payload);
         }
 
         @JavascriptInterface
         public void cancelRequest(String id) {
             if (!isAppOrigin()) return;
+            if (id == null || id.length() > MAX_REQUEST_ID) return;
             if (engine != null) engine.cancel(id);
         }
 
@@ -746,7 +761,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void saveStorage(String key, String value) {
             if (!isAppOrigin()) return;
-            if (!java.util.Arrays.asList(STORAGE_KEYS).contains(key) || value.length() > 2 * 1024 * 1024) return;
+            if (!java.util.Arrays.asList(STORAGE_KEYS).contains(key) || value == null || value.length() > MAX_STORED_DATA) return;
             if (value.isEmpty()) prefs.edit().remove("web." + key).apply();
             else prefs.edit().putString("web." + key, value).apply();
         }
@@ -774,6 +789,20 @@ public class MainActivity extends Activity {
             if (!isAppOrigin()) return "unknown";
             return BuildConfig.VERSION_NAME;
         }
+    }
+
+    // Mirrors the NativeEngine callback shape so the page gets an error
+    // instead of a hung promise when a request is rejected at the bridge.
+    private void replyNativeError(String id, String message) {
+        final String safeId = id == null ? "" : id.substring(0, Math.min(id.length(), MAX_REQUEST_ID));
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || webView == null) return;
+            try {
+                JSONObject payload = new JSONObject().put("ok", false).put("error", message);
+                webView.evaluateJavascript("window.__dinosourNativeResult && window.__dinosourNativeResult(" +
+                        JSONObject.quote(safeId) + "," + payload + ");", null);
+            } catch (Exception ignored) { }
+        });
     }
 
     @Override

@@ -16,13 +16,15 @@
   // No-network fallback: if the page is still not interactive ~4s after parse,
   // show a tiny local card. Uses no modules, no network and no native bridge,
   // and removes itself as soon as the main app signals readiness.
-  var fallbackTimer = null, fallbackCard = null, fallbackWatch = null;
+  var fallbackTimer = null, fallbackCard = null, fallbackWatch = null, fallbackStyle = null;
   function hideFallbackIfReady() {
     if (!window.__dinosourReady) return;
     if (fallbackWatch) { window.clearInterval(fallbackWatch); fallbackWatch = null; }
     if (fallbackTimer) { window.clearTimeout(fallbackTimer); fallbackTimer = null; }
     if (fallbackCard && fallbackCard.parentNode) fallbackCard.parentNode.removeChild(fallbackCard);
     fallbackCard = null;
+    if (fallbackStyle && fallbackStyle.parentNode) fallbackStyle.parentNode.removeChild(fallbackStyle);
+    fallbackStyle = null;
   }
   function showFallback() {
     if (window.__dinosourReady || fallbackCard) return;
@@ -44,6 +46,7 @@
         + '#dinosour-startup-fallback .dinosour-arc{animation:dinosour-startup-spin 1s linear infinite}'
         + '@media (prefers-reduced-motion: reduce){#dinosour-startup-fallback .dinosour-arc{animation:none}}';
       (document.head || document.documentElement).appendChild(style);
+      fallbackStyle = style;
       var overlay = document.createElement('div');
       overlay.id = 'dinosour-startup-fallback';
       overlay.setAttribute('role', 'alert');

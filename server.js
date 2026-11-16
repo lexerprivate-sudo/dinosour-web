@@ -680,6 +680,7 @@ const server = http.createServer(async (req, res) => {
       '/': ['index.html', 'text/html; charset=utf-8', 'no-cache'],
       '/app.js': ['app.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/reel.js': ['reel.js', 'text/javascript; charset=utf-8', 'no-cache'],
+      '/watch.js': ['watch.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/playback-core.js': ['playback-core.js', 'text/javascript; charset=utf-8', 'no-cache'],
   '/downloads.js': ['downloads.js', 'text/javascript; charset=utf-8', 'no-cache'],
       '/native.js': ['native.js', 'text/javascript; charset=utf-8', 'no-cache'],

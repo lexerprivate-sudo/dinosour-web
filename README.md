@@ -198,9 +198,9 @@ invite link (refresh the in-app Share screen to show it).
 - English captions: English creator or automatic tracks in the **Captions** menu,
   with manual tracks offered before auto-generated ones. Your Off/track preference
   is remembered on this device; unavailable tracks are disabled.
-- The watch page’s loading screen shows a progress ring whose percentage is driven
-  by the media buffered ahead of the play position (capped at 45 s), not by
-  elapsed time.
+- The watch page’s loading screen shows a progress ring whose percentage tracks the
+  media buffered ahead of the play position, ramping toward a ~8 s read-ahead
+  target (an indeterminate sweep while awaiting the first bytes), not by elapsed time.
 - One **Library** page for Watch later, liked videos, and your own collections:
   create named collections, rename or delete them any time, play a whole
   collection with **Play all** (it queues the collection and starts the first
@@ -208,6 +208,13 @@ invite link (refresh the in-app Share screen to show it).
   **Save to…** picker on video cards and the watch page files a video into
   Watch later or a collection. Collections live in the same local storage as
   everything else.
+- **Offline downloads:** the watch page can save a video for offline playback
+  via a quality picker (per-option sizes). Video and audio streams are stored
+  separately — on Android as native yt-dlp transfers in the app's own storage,
+  in a browser or on desktop in the browser's Origin Private File System.
+  Downloaded videos play without a network connection and are managed from a
+  **Downloads** rail in Library (storage total, per-item delete). The downloads
+  themselves are device-local and are not carried by JSON backups.
 - Watch later, liked videos, and watch history with resume positions.
 - **Continue watching** on Home: unfinished videos appear in a horizontal rail
   with a progress bar, **Resume**, **Start over**, per-item **x**, and **Clear**.
@@ -274,12 +281,18 @@ the video element too, a normal **Play video** button is shown as a fallback.
    requests while the first frames are loading. The browser synchronizes the
    separate audio/video tracks.
 4. `public/app.js` renders the interface and stores your library locally. The
-   reel keeps two complete video/audio player pairs in the stage. The idle pair
+   watch page and the Shorts reel are lazily loaded chunks
+   (`public/watch.js` on the first `#watch=` visit, `public/reel.js` on the
+   first `#short=`), so the entry bundle never parses them until they are
+   needed; shared playback groundwork lives in `public/playback-core.js`, and
+   the offline download engine in `public/downloads.js`. The reel keeps two
+   complete video/audio player pairs in the stage. The idle pair
    preloads the next Short at 720p (unless the browser reports a metered or very
    slow connection), and a swipe promotes it while the previous pair becomes the
    next prefetch target. At most two Shorts are buffered in memory at once.
 
-Videos are streamed, not saved as downloaded files. Search/metadata/thumbnails
+Videos are streamed by default; the optional offline download feature stores the
+video and audio streams separately on this device (see Features). Search/metadata/thumbnails
 are cached in server memory. Requests still contact YouTube and its CDN; this is
 not an anonymity service. The interface uses system fonts without external font requests.
 
@@ -345,10 +358,10 @@ implementation of its native transport.
 - Speculative loading is skipped on Data Saver/2G connections, cancelled when
   leaving the page, and the warmed player expires after three minutes.
 - While playback starts, the thumbnail and a loading message replace the blank
-  player; the message carries a progress ring whose percentage is driven by the
-  media the browser reports as buffered ahead of the play position (capped at
-  45 s), not by elapsed time. Later buffering uses a small indicator over the
-  last video frame.
+  player; the message carries a progress ring whose percentage tracks the media
+  the browser reports as buffered ahead of the play position, ramping toward a
+  ~8 s read-ahead target (an indeterminate sweep while awaiting the first
+  bytes). Later buffering uses a small indicator over the last video frame.
 - Saved-position playback works with warmed players; playback controls wrap on
   narrow phone screens.
 
@@ -378,6 +391,10 @@ A signed standalone Android build is included:
   element, and the in-page MediaSession is mapped to Android's MediaSession,
   exposing title, channel and artwork with play/pause and next/previous
   controls on the lock screen.
+- Offline downloads: the watch page's Download button saves the video and
+  audio tracks to app storage via a native yt-dlp transfer (a quality picker
+  shows per-option sizes). Downloaded videos play without a network connection
+  and are listed in Library's Downloads rail with a per-item delete.
 
 This application is a separate fork of an earlier project. It has its own
 Android package and GitHub repository.
@@ -512,14 +529,15 @@ What you need:
   watch-prefetch, pwa-browser and features honor `TEST_URL` instead.
 - **System Chrome** (not bundled) for browser suites,
 - **FFmpeg** on PATH for media-related browser suites (watch-prefetch,
-  playback-features, features).
+  playback-features, features, downloads).
 - **yt-dlp** on PATH for the suites whose playback reaches YouTube (browser,
-  recovery, shorts) — the development server needs it too.
+  recovery, shorts, prefetch) — the development server needs it too.
 - Internet access for anything that touches YouTube.
 - Internet and `npm ci` dependencies for build/release suites; the Android
   build output for `test:native` (`android/app/build/playbackEngine/yt-dlp`,
   run via Python 3.11+) and a built desktop install for `test:desktop`.
 - `npm run desktop` (`electron .`) exists as a dev-run convenience that launches the Electron shell from the repo without packaging an installer; `npm run build:desktop` remains the packaged build.
+- `docs/TESTING.md` lists every `test:*` suite with what it covers and its prerequisites.
 
 Run, from the repository root:
 
@@ -534,6 +552,8 @@ npm run test:prefetch
 npm run test:watch-prefetch
 npm run test:playback-features
 npm run test:features
+npm run test:downloads
+npm run test:library
 npm run test:browser
 npm run test:pwa
 ```
@@ -576,6 +596,14 @@ a loading spinner, and the switch stays within a seamless-latency budget.
 verify Continue watching, filters/sorting/recent searches, backup export and
 merge/replace, the share dialog, playback diagnostics, double-tap seeking,
 corrupt storage recovery, re-unlock navigation, and HTML proxy error handling.
+`npm run test:downloads` covers the offline download flow with FFmpeg fixtures:
+the watch-page quality picker and per-option sizes, the OPFS engine (video and
+audio stored as separate files), offline playback after the metadata endpoints
+are dead, the Library Downloads rail with per-item delete, and corrupt-entry
+sanitizing. `npm run test:library` verifies the Library tab with mocked pages
+and media: the sidebar has no separate Saved/Liked entries, collections,
+the Save to picker, Play all queueing, Watch later rails, deletion with an
+armed confirm, and library sanitizing on load.
 `npm test` also starts an isolated server with an access code and checks that
 loopback stays open while forwarded/public requests, APIs, and media require the
 code; it covers invite links, secure cookies, normalization, malformed cookies,

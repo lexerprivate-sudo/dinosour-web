@@ -66,7 +66,7 @@ final class NativeEngine {
                 else if ("download-stat".equals(kind)) result = downloadStat(input.getString("id"));
                 else if ("download-cancel".equals(kind)) { removeDownload(input.getString("id")); result = okResult(); }
                 else if ("download-delete".equals(kind)) { removeDownload(input.getString("id")); result = okResult(); }
-                else throw new IllegalArgumentException("Unsupported request.");
+                else throw new IllegalArgumentException("That request isn't supported.");
                 reply(id, result, null);
             } catch (Exception error) {
                 if (!Thread.currentThread().isInterrupted()) reply(id, null, friendly(error));
@@ -169,7 +169,7 @@ final class NativeEngine {
                 (url.getPort() != -1 && url.getPort() != 443) ||
                 !(host.equals("www.youtube.com") || host.equals("youtube.com") ||
                   host.equals("suggestqueries.google.com") || host.equals("i.ytimg.com"))) {
-            throw new IllegalArgumentException("Unsupported network destination.");
+            throw new IllegalArgumentException("That link isn't supported in this app.");
         }
         return url;
     }
@@ -177,7 +177,7 @@ final class NativeEngine {
     private JSONObject fetch(JSONObject input) throws Exception {
         URL url = allowedUrl(input.getString("url"));
         String method = input.optString("method", "GET");
-        if (!method.equals("GET") && !method.equals("POST")) throw new IllegalArgumentException("Unsupported request method.");
+        if (!method.equals("GET") && !method.equals("POST")) throw new IllegalArgumentException("That request isn't supported.");
         JSONObject headers = input.optJSONObject("headers");
         byte[] body = input.isNull("body") ? null : input.optString("body", "").getBytes(StandardCharsets.UTF_8);
         HttpURLConnection connection = connect(url, method, headers, body, 0);
