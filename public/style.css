@@ -722,11 +722,11 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 .save-state .icon { width: 18px; height: 18px; }
 .save-state.on { background: var(--accent); border-color: var(--accent); color: #0f0f0f; }
 .save-to-new { display: flex; gap: 8px; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
-.save-to-new input { flex: 1; min-width: 0; }
+.save-to-new input { flex: 1; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); color: var(--text); }
 .save-to-new button { flex-shrink: 0; }
 .save-to-empty { color: var(--muted); font-size: 13px; margin: 8px 2px 2px; }
 .collection-dialog input { width: 100%; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--input); padding: 12px; margin-top: 6px; }
-.collection-dialog label { display: block; margin: 0 0 2px; font-weight: 500; }
+.collection-dialog label { display: flex; align-items: center; min-height: 44px; margin: 0 0 2px; font-weight: 500; }
 @media (max-width: 720px) {
   .collection-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .library-rail .card { flex-basis: 168px; }
@@ -743,4 +743,8 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); ou
 .watch-page video::-webkit-media-controls-panel,
 .watch-page video::-webkit-media-controls-enclosure,
 .watch-page video::-webkit-media-controls-timeline,
-.watch-page video::-webkit-media-controls-play-button { display: flex !important; visibility: visible !important; opacity:
+.watch-page video::-webkit-media-controls-play-button { display: flex !important; visibility: visible !important; opacity: 1 !important; }
+
+/* Touch targets: shared 44px minimum hit-area helper (WCAG 2.5.5 Target Size / Apple HIG 44pt). Icons stay visually identical; only the box grows. */
+.touch-target { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+#topic-dialog label:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
