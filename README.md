@@ -2,7 +2,7 @@
 
 ## Windows desktop app
 
-Download [Dinosour Web Desktop 1.1.14](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.14/DinosourWeb-Setup-1.1.14.exe)
+Download [Dinosour Web Desktop 1.1.15](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.15/DinosourWeb-Setup-1.1.15.exe)
 and run the installer. Supports Windows 10/11 x64. Open **Dinosour Web** from
 the desktop or Start menu. Node, Chromium and yt-dlp are bundled; no terminal
 or separate runtime installation is needed. Internet access is required.
@@ -12,7 +12,7 @@ local origin preserves saved videos, topics, settings and history across app
 upgrades. Browser/Android libraries can be transferred using Settings backup
 export/import. Desktop updates are separate from Android releases.
 
-Desktop 1.1.14 keeps sound playing in the background (music mode: the video track
+Desktop 1.1.15 keeps sound playing in the background (music mode: the video track
 pauses and the audio keeps playing): while media plays, closing the window only
 hides it to the system tray (with a hint balloon the first time) and the tray
 icon offers Open/Quit; the Dinosour menu Quit always exits fully. The app also
@@ -24,14 +24,14 @@ the Desktop. "Check for desktop updates" in the Dinosour menu triggers the
 same flow on demand and offers an immediate restart.
 
 Already on an older desktop install such as 1.1.8? The self-updater above has
-Desktop avoid version skew: desktop releases are separate from Android (`desktop-vX.Y.Z`), the bundled server serves current `public/` files, and the self-updater takes the newest release on quit. If you are on an old build and the updater has not arrived yet, installing over the top preserves your library: [desktop-v1.1.14 release](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.14/DinosourWeb-Setup-1.1.14.exe) or the latest release from the [releases page](https://github.com/lexerprivate-sudo/dinosour-web/releases).
+Desktop avoid version skew: desktop releases are separate from Android (`desktop-vX.Y.Z`), the bundled server serves current `public/` files, and the self-updater takes the newest release on quit. If you are on an old build and the updater has not arrived yet, installing over the top preserves your library: [desktop-v1.1.15 release](https://github.com/lexerprivate-sudo/dinosour-web/releases/download/desktop-v1.1.15/DinosourWeb-Setup-1.1.15.exe) or the latest release from the [releases page](https://github.com/lexerprivate-sudo/dinosour-web/releases).
 
 The installer is unsigned. Windows may display an unknown-publisher warning.
 The download is approximately 145 MB. Source and third-party notices are included
 in the release/tag; see `desktop/THIRD_PARTY_NOTICES.md`.
 
 Build locally: `npm ci`, `npm run build:desktop`. Output:
-`dist/DinosourWeb-Setup-1.1.14.exe`. Test the packaged app using
+`dist/DinosourWeb-Setup-1.1.15.exe`. Test the packaged app using
 `npm run test:desktop` (live internet required). Tests use an isolated profile.
 
 Desktop 1.0.1+ uses bounded 1 MB media requests with one chunk of
@@ -43,7 +43,7 @@ reuse their buffered media.
 
 ## Android: open and watch
 
-The **1.2.16 Android app is standalone**: install `DinosourWeb.apk`, open it,
+The **1.2.17 Android app is standalone**: install `DinosourWeb.apk`, open it,
 and watch using Wi-Fi or mobile data. No PC, server address, tunnel, invite code,
 hosting account, or YouTube account is required. The interface and playback
 engine are bundled in the APK. Only public, unrestricted recorded videos are
@@ -381,10 +381,10 @@ A signed standalone Android build is included:
 
 - Download the latest APK:
   <https://github.com/lexerprivate-sudo/dinosour-web/releases/latest>
-- Local copies: `releases\DinosourWeb-1.2.16.apk` in this project folder
+- Local copies: `releases\DinosourWeb-1.2.17.apk` in this project folder
 - Served by the backend at `/download/DinosourWeb.apk`
 - Android 7.0+ (API 24), target API 34
-- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.16`
+- Launcher name **Dinosour Web**, package `com.dinosour.web`, version `1.2.17`
 - Opens directly to Home. Settings contain app information and update checks,
   with no server-address prompt.
 - Shows a native opening screen until the interface is ready, independently of
@@ -409,7 +409,7 @@ The APK serves the bundled interface from a virtual HTTPS origin inside WebView.
 Search and caption requests use native HTTPS networking; metadata uses the
 bundled yt-dlp Android runtime. Media comes directly from YouTube on the phone's
 own connection. No local listening port or remote application server is needed.
-The larger APK includes Python and QuickJS for ARM and x86 phones/emulators.
+The APK is arm64-v8a-only and includes Python and QuickJS.
 
 ### Install on the phone
 
@@ -466,7 +466,7 @@ apps** permission for Dinosour; GitHub/APKs cannot update silently like the Play
 Store.
 
 For GitHub distribution, this project is published at
-<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.16` release hosts
+<https://github.com/lexerprivate-sudo/dinosour-web>. The `v1.2.17` release hosts
 `DinosourWeb.apk`. Update metadata uses the version-specific APK URL so an update
 check cannot accidentally download an older asset while a release is publishing.
 The `/releases/latest/download/DinosourWeb.apk` link remains the easy sharing URL.

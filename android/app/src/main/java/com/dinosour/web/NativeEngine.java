@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -150,13 +151,38 @@ final class NativeEngine {
         runtimeReady = true;
     }
 
+    // User-visible literals the app itself throws as IllegalArgumentException /
+    // IllegalStateException. Anything else (yt-dlp, org.json, HttpURLConnection)
+    // may carry paths or tokens, so it is scrubbed to a generic string.
+    // API 24-compatible initializer: Set.of would be NoSuchMethodError below API 30.
+    private static final Set<String> SAFE_LITERALS = Collections.unmodifiableSet(
+            new java.util.HashSet<>(java.util.Arrays.asList(
+            "That request isn't supported.",
+            "Invalid video ID.",
+            "That link isn't supported in this app.",
+            "Too many redirects.",
+            "The response is too large.",
+            "No compatible download streams are available for this video.",
+            "Not enough storage. Free space and try again.",
+            "This video is already downloading.",
+            "A few downloads are queued. Please try again in a moment.",
+            "Could not create the downloads folder.",
+            "The video could not be downloaded. Check your connection and retry.",
+            "The audio track could not be downloaded. Check your connection and retry.")));
+
+    private static String safeLiteral(String message) {
+        return message != null && SAFE_LITERALS.contains(message)
+                ? message
+                : "Could not complete that request. Please retry.";
+    }
+
     static String friendly(Exception error) {
         String message = String.valueOf(error.getMessage()).toLowerCase(Locale.ROOT);
         if (message.contains("sign in") || message.contains("confirm") && message.contains("bot"))
             return "YouTube requires sign-in or has temporarily limited this connection. Try another public video.";
         if (message.contains("private") || message.contains("age-restricted") || message.contains("members-only"))
             return "This video is restricted. Choose a public video.";
-        if (error instanceof IllegalArgumentException) return error.getMessage();
+        if (error instanceof IllegalArgumentException) return safeLiteral(error.getMessage());
         if (message.contains("initialize") || message.contains("python") || message.contains("permission denied"))
             return "The playback engine could not start. Reopen the app or check for an app update.";
         return "Could not load from YouTube. Check your Wi-Fi or mobile data and retry.";
@@ -501,7 +527,7 @@ final class NativeEngine {
             String message = Thread.currentThread().isInterrupted()
                     ? "The download was interrupted."
                     : error instanceof IllegalArgumentException || error instanceof IllegalStateException
-                        ? error.getMessage()
+                        ? safeLiteral(error.getMessage())
                         : friendly(error);
             if (message == null || message.isEmpty() || "null".equalsIgnoreCase(message))
                 message = "Could not finish the download. Check your Wi-Fi and retry.";

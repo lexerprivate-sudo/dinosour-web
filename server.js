@@ -656,7 +656,16 @@ const server = http.createServer(async (req, res) => {
       const id = url.searchParams.get('id');
       if (!validId(id)) return json(res, 400, { error: 'Invalid YouTube video ID.' });
       if (url.searchParams.get('refresh') === '1') cache.delete(`video:${id}`);
-      return json(res, 200, withStreamUrls(await getVideo(id), mediaBaseFor(req)));
+      try {
+        return json(res, 200, withStreamUrls(await getVideo(id), mediaBaseFor(req)));
+      } catch (error) {
+        // Upstream YouTube call failed (yt-dlp timeout, refused stream, etc.):
+        // tell clients/proxies to back off instead of hammering YouTube on retry loops.
+        if (res.destroyed || res.headersSent) throw error;
+        console.error(`${req.method} ${url.pathname} failed: ${error.message}`);
+        res.setHeader('Retry-After', '30');
+        return json(res, 502, { error: publicError(error) });
+      }
     }
     if (url.pathname.startsWith('/api/stream/')) return serveStream(req, res, url);
     if (url.pathname === '/app-update.json') {

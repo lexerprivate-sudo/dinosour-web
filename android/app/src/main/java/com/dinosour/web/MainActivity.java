@@ -555,7 +555,8 @@ public class MainActivity extends Activity {
             String mime = asset.endsWith(".html") ? "text/html" :
                     asset.endsWith(".js") ? "text/javascript" : asset.endsWith(".css") ? "text/css" :
                     asset.endsWith(".svg") ? "image/svg+xml" : asset.endsWith(".png") ? "image/png" :
-                    asset.endsWith(".json") || asset.endsWith(".webmanifest") ? "application/json" : "text/plain";
+                    asset.endsWith(".webmanifest") ? "application/manifest+json" :
+                    asset.endsWith(".json") ? "application/json" : "text/plain";
             try {
                 java.util.Map<String, String> headers = new java.util.HashMap<>();
                 headers.put("Cache-Control", "no-cache");
